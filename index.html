@@ -612,7 +612,11 @@ footer {
 
 <div class="toast" id="toast"></div>
 
-<footer></footer>
+<footer>
+  <p style="color:var(--text-dim);font-size:0.75rem;text-align:center;padding:24px 0 16px;">
+    Copyright &copy; <span id="footerYear"></span> &mdash; Dibuat oleh <strong style="color:var(--accent)">Team VR</strong>. Hak cipta dilindungi Undang-undang.
+  </p>
+</footer>
 
 <script>
 const CORETAX_CODES = {
@@ -2609,6 +2613,7 @@ function detectJenisFromCode(code) {
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 let allFaktur = [];
+document.getElementById('footerYear').textContent = new Date().getFullYear();
 
 // Ripple effect for all buttons
 document.addEventListener('click', e => {
