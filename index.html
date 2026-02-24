@@ -10,6 +10,18 @@
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
+.jenis-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.jenis-bkp { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+.jenis-jkp { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+.jenis-campuran { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+
 :root {
   --bg: #0a0f1c;
   --surface: #111827;
@@ -791,13 +803,24 @@ function parseFakturCoretax(text, fileName) {
       let qty = 0;
       let unit = '';
       let jumlah = 0;
+      let jenis = ''; // BKP or JKP
       
       // Read subsequent lines for this item
-      for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+      for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
         let l = lines[j];
         // If it's the next item or a total line, stop
         if (/^\d+\s+\d{4,6}/.test(l)) break;
         if (/^Harga Jual/i.test(l)) break;
+        
+        // Detect BKP / JKP label — from Coretax PDF (GOODS/SERVICES) or old eFaktur (BKP/JKP)
+        if (/^\s*GOODS\s*$/i.test(l)) { jenis = 'BKP'; continue; }
+        if (/^\s*SERVICES\s*$/i.test(l)) { jenis = 'JKP'; continue; }
+        if (/^\s*BKP\s*$/i.test(l) || /Barang Kena Pajak/i.test(l)) { jenis = 'BKP'; continue; }
+        if (/^\s*JKP\s*$/i.test(l) || /Jasa Kena Pajak/i.test(l)) { jenis = 'JKP'; continue; }
+        if (!jenis && /\bGOODS\b/.test(l)) jenis = 'BKP';
+        if (!jenis && /\bSERVICES\b/.test(l)) jenis = 'JKP';
+        if (!jenis && /\bBKP\b/.test(l)) jenis = 'BKP';
+        if (!jenis && /\bJKP\b/.test(l)) jenis = 'JKP';
         
         // Nama barang
         if (!namaBarang && l && !/^Rp\s/i.test(l) && !/^Potongan/i.test(l) && !/^PPnBM/i.test(l)) {
@@ -830,7 +853,17 @@ function parseFakturCoretax(text, fileName) {
         jumlah = parseNum(endValMatch[1]);
       }
 
-      itemBlocks.push({ no: itemNo, kodeBarang, namaBarang, harga, qty, unit, jumlah });
+      // Fallback: detect from nama barang if BKP/JKP not found in PDF
+      if (!jenis) {
+        const nm = (namaBarang || '').toUpperCase();
+        if (/\b(TRX|LAYANAN|SERVICE|JASA|CLOUD|INTERNET|HOSTING|LANGGANAN|SUBSCRIPTION|PAKET DATA|ROAMING|GOOGLE)\b/.test(nm)) {
+          jenis = 'JKP';
+        } else if (/\b(VOUCHER|KARTU|PERDANA|HANDSET|MODEM|DEVICE|HARDWARE|BUNDLING PRODUCT|PHYSICAL|ROUTER)\b/.test(nm)) {
+          jenis = 'BKP';
+        }
+      }
+
+      itemBlocks.push({ no: itemNo, kodeBarang, namaBarang, harga, qty, unit, jumlah, jenis });
     }
   }
 
@@ -885,6 +918,11 @@ function parseFakturCoretax(text, fileName) {
   }
 
   result.items = itemBlocks;
+
+  // Determine overall jenis transaksi
+  const hasJKP = itemBlocks.some(it => it.jenis === 'JKP');
+  const hasBKP = itemBlocks.some(it => it.jenis === 'BKP');
+  result.jenisTransaksi = (hasJKP && hasBKP) ? 'Campuran' : (hasJKP ? 'JKP' : (hasBKP ? 'BKP' : ''));
 
   // If we still have no items but have DPP, create a single-item entry
   if (result.items.length === 0 && result.dpp > 0) {
@@ -961,7 +999,8 @@ function renderTable() {
       <th>Tanggal</th>
       <th>PKP / Penjual</th>
       <th>Pembeli</th>
-      <th>Barang</th>
+      <th>Barang / Jasa</th>
+      <th>Jenis</th>
       <th class="text-right">Harga Jual</th>
       <th class="text-right">DPP</th>
       <th class="text-right">PPN</th>
@@ -978,6 +1017,7 @@ function renderTable() {
       <td title="${f.alamatPKP}">${f.namaPKP || '-'}</td>
       <td title="${f.alamatPembeli}">${f.namaPembeli || '-'}</td>
       <td title="${barangSummary}">${barangSummary.substring(0, 30) || '-'}${barangSummary.length > 30 ? '…' : ''}</td>
+      <td>${f.jenisTransaksi ? `<span class="jenis-badge jenis-${(f.jenisTransaksi||'').toLowerCase()}" title="${f.jenisTransaksi === 'BKP' ? 'GOODS (Barang Kena Pajak)' : f.jenisTransaksi === 'JKP' ? 'SERVICES (Jasa Kena Pajak)' : 'Campuran BKP & JKP'}">${f.jenisTransaksi}</span>` : '<span style="color:var(--text-dim);font-size:11px">?</span>'}</td>
       <td class="text-right mono">${formatRp(f.hargaJual)}</td>
       <td class="text-right mono">${formatRp(f.dpp)}</td>
       <td class="text-right mono">${formatRp(f.ppn)}</td>
@@ -1028,7 +1068,7 @@ function exportExcel() {
     ['REKAP FAKTUR PAJAK'],
     ['Tanggal Export: ' + new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })],
     [],
-    ['No', 'No. Faktur Pajak', 'Tanggal', 'PKP / Penjual', 'NPWP PKP', 'Pembeli', 'NPWP Pembeli', 'Harga Jual (Rp)', 'Potongan (Rp)', 'DPP (Rp)', 'PPN (Rp)', 'PPnBM (Rp)', 'Keterangan', 'Referensi', 'Penandatangan']
+    ['No', 'No. Faktur Pajak', 'Tanggal', 'PKP / Penjual', 'NPWP PKP', 'Pembeli', 'NPWP Pembeli', 'Jenis Transaksi', 'Harga Jual (Rp)', 'Potongan (Rp)', 'DPP (Rp)', 'PPN (Rp)', 'PPnBM (Rp)', 'Keterangan', 'Referensi', 'Penandatangan']
   ];
 
   allFaktur.forEach((f, i) => {
@@ -1040,6 +1080,7 @@ function exportExcel() {
       f.npwpPKP,
       f.namaPembeli,
       f.npwpPembeli,
+      f.jenisTransaksi || '',
       f.hargaJual,
       f.potongan,
       f.dpp,
@@ -1055,11 +1096,11 @@ function exportExcel() {
   const lastRow = rekapData.length;
   rekapData.push([
     '', 'TOTAL', '', '', '', '', '',
-    { t: 'n', f: `SUM(H5:H${lastRow})` },
     { t: 'n', f: `SUM(I5:I${lastRow})` },
     { t: 'n', f: `SUM(J5:J${lastRow})` },
     { t: 'n', f: `SUM(K5:K${lastRow})` },
     { t: 'n', f: `SUM(L5:L${lastRow})` },
+    { t: 'n', f: `SUM(M5:M${lastRow})` },
     '', '', ''
   ]);
 
@@ -1068,13 +1109,13 @@ function exportExcel() {
   // Column widths
   wsRekap['!cols'] = [
     {wch:5}, {wch:25}, {wch:20}, {wch:30}, {wch:20}, {wch:30}, {wch:20},
-    {wch:18}, {wch:15}, {wch:18}, {wch:15}, {wch:15}, {wch:25}, {wch:25}, {wch:20}
+    {wch:12}, {wch:18}, {wch:15}, {wch:18}, {wch:15}, {wch:15}, {wch:25}, {wch:25}, {wch:20}
   ];
 
   // Number format for currency columns
   const numFmt = '#,##0';
   for (let r = 4; r <= lastRow; r++) {
-    ['H','I','J','K','L'].forEach(c => {
+    ['I','J','K','L','M'].forEach(c => {
       const ref = c + (r + 1);
       if (wsRekap[ref]) wsRekap[ref].z = numFmt;
     });
@@ -1086,7 +1127,7 @@ function exportExcel() {
   const detailData = [
     ['DETAIL LINE ITEMS FAKTUR PAJAK'],
     [],
-    ['No', 'No. Faktur', 'Tanggal', 'Item', 'Kode Barang', 'Nama Barang / Jasa', 'Harga Satuan (Rp)', 'Kuantitas', 'Satuan', 'Jumlah (Rp)']
+    ['No', 'No. Faktur', 'Tanggal', 'Item', 'Kode Barang', 'Nama Barang / Jasa', 'Jenis (BKP/JKP)', 'Harga Satuan (Rp)', 'Kuantitas', 'Satuan', 'Jumlah (Rp)']
   ];
 
   let itemNo = 0;
@@ -1100,6 +1141,7 @@ function exportExcel() {
         item.no,
         item.kodeBarang,
         item.namaBarang,
+        item.jenis ? (item.jenis === 'BKP' ? 'BKP (GOODS)' : item.jenis === 'JKP' ? 'JKP (SERVICES)' : item.jenis) : '',
         item.harga,
         item.qty,
         item.unit,
@@ -1111,16 +1153,16 @@ function exportExcel() {
   const detailLastRow = detailData.length;
   detailData.push([
     '', 'TOTAL', '', '', '', '', '', '', '',
-    { t: 'n', f: `SUM(J4:J${detailLastRow})` }
+    { t: 'n', f: `SUM(K4:K${detailLastRow})` }
   ]);
 
   const wsDetail = XLSX.utils.aoa_to_sheet(detailData);
   wsDetail['!cols'] = [
-    {wch:5}, {wch:25}, {wch:20}, {wch:6}, {wch:12}, {wch:35}, {wch:18}, {wch:12}, {wch:10}, {wch:18}
+    {wch:5}, {wch:25}, {wch:20}, {wch:6}, {wch:12}, {wch:35}, {wch:12}, {wch:18}, {wch:12}, {wch:10}, {wch:18}
   ];
 
   for (let r = 3; r <= detailLastRow; r++) {
-    ['G','H','J'].forEach(c => {
+    ['H','I','K'].forEach(c => {
       const ref = c + (r + 1);
       if (wsDetail[ref]) wsDetail[ref].z = numFmt;
     });
