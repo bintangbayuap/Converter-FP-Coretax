@@ -6,7 +6,7 @@
 <title>Converter FP Coretax → Excel</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
@@ -57,7 +57,7 @@ body::before {
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 900px;
   margin: 0 auto;
   padding: 24px;
 }
@@ -65,7 +65,7 @@ body::before {
 /* Header */
 header {
   text-align: center;
-  padding: 48px 0 32px;
+  padding: 32px 0 24px;
   position: relative;
 }
 
@@ -116,56 +116,94 @@ h1 {
 
 /* Drop Zone */
 .dropzone {
-  border: 2px dashed var(--border);
-  border-radius: var(--radius);
-  padding: 56px 24px;
+  border: none;
+  border-radius: 20px;
+  padding: 52px 32px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.45s cubic-bezier(0.16, 1, 0.3, 1);
   background: var(--surface);
-  margin: 32px 0;
+  margin: 24px 0;
   position: relative;
   overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.4),
+              0 10px 40px -8px rgba(0,0,0,0.6),
+              0 0 0 1px rgba(255,255,255,0.05);
 }
 
 .dropzone::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 50% 50%, var(--accent-glow), transparent 70%);
+  background: radial-gradient(circle at 50% 0%, rgba(245,158,11,0.06), transparent 65%);
   opacity: 0;
-  transition: opacity 0.3s;
+  transition: opacity 0.4s;
 }
 
 .dropzone:hover, .dropzone.dragover {
-  border-color: var(--accent);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 12px -2px rgba(0,0,0,0.5),
+              0 20px 56px -8px rgba(0,0,0,0.7),
+              0 0 0 1px rgba(245,158,11,0.2);
 }
 
 .dropzone:hover::before, .dropzone.dragover::before {
   opacity: 1;
 }
 
-.drop-icon {
-  font-size: 3rem;
-  margin-bottom: 16px;
-  display: block;
+.drop-icon-wrap {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.07);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px;
   position: relative;
   z-index: 1;
+  transition: background 0.3s, transform 0.3s;
+  box-shadow: 0 0 0 8px rgba(255,255,255,0.03);
+}
+
+.dropzone:hover .drop-icon-wrap,
+.dropzone.dragover .drop-icon-wrap {
+  background: rgba(245,158,11,0.15);
+  transform: scale(1.08);
+  box-shadow: 0 0 0 8px rgba(245,158,11,0.06);
+}
+
+.drop-icon-wrap svg {
+  width: 26px;
+  height: 26px;
+  stroke: var(--text-dim);
+  transition: stroke 0.3s;
+}
+
+.dropzone:hover .drop-icon-wrap svg,
+.dropzone.dragover .drop-icon-wrap svg {
+  stroke: var(--accent);
+}
+
+.drop-icon {
+  display: none; /* replaced by drop-icon-wrap */
 }
 
 .drop-text {
-  font-size: 1rem;
-  font-weight: 500;
+  font-size: 1.15rem;
+  font-weight: 700;
   position: relative;
   z-index: 1;
+  color: var(--text);
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
 }
 
 .drop-hint {
   color: var(--text-dim);
   font-size: 0.8125rem;
-  margin-top: 8px;
+  margin-top: 0;
+  margin-bottom: 28px;
   position: relative;
   z-index: 1;
 }
@@ -174,6 +212,38 @@ h1 {
   color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
+}
+
+.drop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--text);
+  color: var(--bg);
+  border: none;
+  border-radius: 999px;
+  padding: 12px 28px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+  z-index: 2;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  font-family: inherit;
+  letter-spacing: -0.01em;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+}
+
+.drop-btn:hover {
+  background: var(--accent);
+  color: #000;
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 6px 24px var(--accent-glow), 0 0 0 3px rgba(245,158,11,0.2);
+}
+
+.drop-btn:active {
+  transform: scale(0.97);
+  transition: all 0.08s ease;
 }
 
 #fileInput { display: none; }
@@ -195,10 +265,12 @@ h1 {
 }
 
 .stat-value {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-family: 'Outfit', 'Inter', sans-serif;
+  font-size: 1.75rem;
+  font-weight: 700;
   color: var(--accent);
+  letter-spacing: -0.02em;
+  line-height: 1;
 }
 
 .stat-label {
@@ -521,9 +593,15 @@ footer {
 @media (max-width: 768px) {
   .container { padding: 16px; }
   h1 { font-size: 1.375rem; }
-  .dropzone { padding: 32px 16px; }
+  .dropzone { padding: 40px 20px; }
   .action-bar { flex-direction: column; }
   .btn { justify-content: center; }
+}
+
+/* Large screens — keep things tight */
+@media (min-width: 1024px) {
+  .dropzone { padding: 60px 40px; }
+  header { padding: 28px 0 20px; }
 }
 
 /* Row delete */
@@ -541,8 +619,62 @@ footer {
   color: var(--danger);
   background: rgba(239, 68, 68, 0.1);
 }
+/* ── Progressive Disclosure ── */
+.results-section {
+  overflow: hidden;
+  transition: max-height 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.5s ease,
+              transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.results-hidden {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-16px);
+  pointer-events: none;
+}
+.results-visible {
+  max-height: 9999px;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+/* Staggered children animation */
+.results-section.results-visible .stats-bar {
+  animation: slideIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.results-section.results-visible .action-bar {
+  animation: slideIn 0.45s 0.06s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.results-section.results-visible #tableContainer {
+  animation: slideIn 0.45s 0.12s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.results-section.results-visible .log-panel {
+  animation: slideIn 0.45s 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* Dropzone compact when results visible */
+.dropzone.compact {
+  padding: 20px 32px;
+  margin-bottom: 16px;
+}
+.dropzone.compact .drop-icon-wrap {
+  display: none;
+}
+.dropzone.compact .drop-text {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+.dropzone.compact .drop-hint {
+  display: none;
+}
+.dropzone.compact .drop-btn {
+  display: none;
+}
 </style>
-</head>
 <body>
 
 <div class="container">
@@ -559,49 +691,60 @@ footer {
   </header>
 
   <div class="dropzone" id="dropzone">
-    <span class="drop-icon">📁</span>
-    <div class="drop-text">Drop file PDF Faktur Pajak di sini</div>
-    <div class="drop-hint">atau <span onclick="document.getElementById('fileInput').click()">pilih file</span> · Bisa multiple file sekaligus</div>
+    <div class="drop-icon-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+    </div>
+    <div class="drop-text">Upload File PDF</div>
+    <div class="drop-hint">Drag &amp; drop file PDF Faktur Pajak atau klik tombol di bawah ini<br>(Bisa multiple file)</div>
+    <button class="drop-btn" onclick="event.stopPropagation(); document.getElementById('fileInput').click()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+      </svg>
+      Pilih File PDF
+    </button>
     <input type="file" id="fileInput" accept=".pdf" multiple>
   </div>
 
-  <div class="stats-bar" id="statsBar" style="display:none">
-    <div class="stat-card">
-      <div class="stat-value" id="statFiles">0</div>
-      <div class="stat-label">Faktur</div>
+  <div id="resultsSection" class="results-section results-hidden">
+    <div class="stats-bar" id="statsBar">
+      <div class="stat-card">
+        <div class="stat-value" id="statFiles">0</div>
+        <div class="stat-label">Faktur</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statItems">0</div>
+        <div class="stat-label">Line Items</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statDPP">0</div>
+        <div class="stat-label">Total DPP</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statPPN">0</div>
+        <div class="stat-label">Total PPN</div>
+      </div>
     </div>
-    <div class="stat-card">
-      <div class="stat-value" id="statItems">0</div>
-      <div class="stat-label">Line Items</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value" id="statDPP">0</div>
-      <div class="stat-label">Total DPP</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value" id="statPPN">0</div>
-      <div class="stat-label">Total PPN</div>
-    </div>
-  </div>
 
-  <div class="action-bar" id="actionBar" style="display:none">
-    <button class="btn btn-primary" id="btnExport" onclick="exportExcel()"><span class="btn-icon">📊</span> Export ke Excel</button>
-    <button class="btn btn-add" onclick="document.getElementById('fileInput').click()">➕ Tambah File</button>
-    <button class="btn btn-danger" onclick="clearAll()">🗑️ Hapus Semua</button>
-  </div>
-
-  <div id="tableContainer">
-    <div class="empty-state">
-      <p>Belum ada data. Upload file PDF Faktur Pajak Coretax untuk memulai.</p>
+    <div class="action-bar" id="actionBar">
+      <button class="btn btn-primary" id="btnExport" onclick="exportExcel()"><span class="btn-icon">📊</span> Export ke Excel</button>
+      <button class="btn btn-add" onclick="document.getElementById('fileInput').click()">➕ Tambah File</button>
+      <button class="btn btn-danger" onclick="clearAll()">🗑️ Hapus Semua</button>
     </div>
-  </div>
 
-  <div class="log-panel" id="logPanel" style="display:none">
-    <div class="log-header" onclick="toggleLog()">
-      <span>📋 Log Proses</span>
-      <span id="logToggle">▼</span>
+    <div id="tableContainer"></div>
+
+    <div class="log-panel" id="logPanel">
+      <div class="log-header" onclick="toggleLog()">
+        <span>📋 Log Proses</span>
+        <span id="logToggle">▼</span>
+      </div>
+      <div class="log-body" id="logBody"></div>
     </div>
-    <div class="log-body" id="logBody"></div>
   </div>
 </div>
 
@@ -2610,7 +2753,26 @@ function detectJenisFromCode(code) {
   return '';
 }
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// Fix PDF.js worker — cegah "fake worker" warning
+(function() {
+  const workerUrl = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  try {
+    // Coba set worker normal dulu
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+    // Test apakah Worker bisa dibuat (akan gagal jika CSP blokir)
+    const testWorker = new Worker(
+      URL.createObjectURL(new Blob(
+        [`importScripts('${workerUrl}')`],
+        { type: 'application/javascript' }
+      ))
+    );
+    testWorker.terminate();
+    URL.revokeObjectURL(testWorker);
+  } catch(e) {
+    // Fallback: pakai workerSrc CDN langsung (browser normal)
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+  }
+})();
 
 let allFaktur = [];
 document.getElementById('footerYear').textContent = new Date().getFullYear();
@@ -2652,7 +2814,6 @@ fileInput.addEventListener('change', ev => {
 function log(msg, type = '') {
   const logPanel = document.getElementById('logPanel');
   const logBody = document.getElementById('logBody');
-  logPanel.style.display = 'block';
   logBody.classList.add('open');
   const entry = document.createElement('div');
   entry.className = 'log-entry ' + type;
@@ -3128,8 +3289,18 @@ function formatRpShort(n) {
 
 function updateStats() {
   const show = allFaktur.length > 0;
-  document.getElementById('statsBar').style.display = show ? 'grid' : 'none';
-  document.getElementById('actionBar').style.display = show ? 'flex' : 'none';
+  const resultsSection = document.getElementById('resultsSection');
+  const dropzone = document.getElementById('dropzone');
+
+  if (show) {
+    resultsSection.classList.remove('results-hidden');
+    resultsSection.classList.add('results-visible');
+    dropzone.classList.add('compact');
+  } else {
+    resultsSection.classList.remove('results-visible');
+    resultsSection.classList.add('results-hidden');
+    dropzone.classList.remove('compact');
+  }
 
   if (!show) return;
 
