@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Converter FP Coretax → Excel</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg: #0a0f1c;
+  --surface: #111827;
+  --surface2: #1a2236;
+  --border: #2a3554;
+  --text: #e2e8f0;
+  --text-dim: #8892a8;
+  --accent: #f59e0b;
+  --accent2: #eab308;
+  --accent-glow: rgba(245, 158, 11, 0.15);
+  --success: #10b981;
+  --danger: #ef4444;
+  --info: #3b82f6;
+  --radius: 12px;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Grain overlay */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+/* Header */
+header {
+  text-align: center;
+  padding: 48px 0 32px;
+  position: relative;
+}
+
+header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.logo-icon {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  box-shadow: 0 0 30px var(--accent-glow);
+}
+
+h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, var(--text), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+  color: var(--text-dim);
+  font-size: 0.875rem;
+  margin-top: 8px;
+}
+
+/* Drop Zone */
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 56px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: var(--surface);
+  margin: 32px 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.dropzone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%, var(--accent-glow), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.dropzone:hover, .dropzone.dragover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+
+.dropzone:hover::before, .dropzone.dragover::before {
+  opacity: 1;
+}
+
+.drop-icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+  display: block;
+  position: relative;
+  z-index: 1;
+}
+
+.drop-text {
+  font-size: 1rem;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+
+.drop-hint {
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+  margin-top: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.drop-hint span {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+#fileInput { display: none; }
+
+/* Stats Bar */
+.stats-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+}
+
+.stat-value {
+  font-family: 'DM Mono', monospace;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Action Bar */
+.action-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:hover {
+  background: var(--surface2);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #000;
+  border: none;
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #000;
+  box-shadow: 0 4px 20px var(--accent-glow);
+  transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* Table */
+.table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+thead th {
+  background: var(--surface2);
+  padding: 12px 14px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(42, 53, 84, 0.5);
+  white-space: nowrap;
+}
+
+tbody tr {
+  transition: background 0.15s;
+}
+
+tbody tr:hover {
+  background: var(--surface2);
+}
+
+.mono {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.badge-success {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+}
+
+.badge-info {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--info);
+}
+
+/* Processing overlay */
+.processing {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 15, 28, 0.9);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  gap: 16px;
+  backdrop-filter: blur(4px);
+}
+
+.processing.active { display: flex; }
+
+.spinner {
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.processing-text {
+  font-size: 0.875rem;
+  color: var(--text-dim);
+}
+
+/* Log */
+.log-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-top: 24px;
+  overflow: hidden;
+}
+
+.log-header {
+  padding: 12px 16px;
+  background: var(--surface2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.log-body {
+  padding: 16px;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.75rem;
+  line-height: 1.8;
+  display: none;
+}
+
+.log-body.open { display: block; }
+
+.log-entry { color: var(--text-dim); }
+.log-entry.success { color: var(--success); }
+.log-entry.error { color: var(--danger); }
+.log-entry.info { color: var(--info); }
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 48px;
+  color: var(--text-dim);
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 12px 20px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  z-index: 2000;
+  transform: translateY(100px);
+  opacity: 0;
+  transition: all 0.3s ease;
+  max-width: 400px;
+}
+
+.toast.show {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.toast.success { border-color: var(--success); }
+.toast.error { border-color: var(--danger); }
+
+/* Footer */
+footer {
+  text-align: center;
+  padding: 32px;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .container { padding: 16px; }
+  h1 { font-size: 1.375rem; }
+  .dropzone { padding: 32px 16px; }
+  .action-bar { flex-direction: column; }
+  .btn { justify-content: center; }
+}
+
+/* Row delete */
+.btn-row-delete {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+.btn-row-delete:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div class="logo">
+      <div class="logo-icon">📄</div>
+      <div>
+        <h1>Converter FP Coretax → Excel</h1>
+        <p class="subtitle">Convert Faktur Pajak Coretax PDF jadi Rekapan Excel</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="dropzone" id="dropzone">
+    <span class="drop-icon">📁</span>
+    <div class="drop-text">Drop file PDF Faktur Pajak di sini</div>
+    <div class="drop-hint">atau <span onclick="document.getElementById('fileInput').click()">pilih file</span> · Bisa multiple file sekaligus</div>
+    <input type="file" id="fileInput" accept=".pdf" multiple>
+  </div>
+
+  <div class="stats-bar" id="statsBar" style="display:none">
+    <div class="stat-card">
+      <div class="stat-value" id="statFiles">0</div>
+      <div class="stat-label">Faktur</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="statItems">0</div>
+      <div class="stat-label">Line Items</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="statDPP">0</div>
+      <div class="stat-label">Total DPP</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="statPPN">0</div>
+      <div class="stat-label">Total PPN</div>
+    </div>
+  </div>
+
+  <div class="action-bar" id="actionBar" style="display:none">
+    <button class="btn btn-primary" id="btnExport" onclick="exportExcel()">📊 Export ke Excel</button>
+    <button class="btn" onclick="document.getElementById('fileInput').click()">➕ Tambah File</button>
+    <button class="btn btn-danger" onclick="clearAll()">🗑️ Hapus Semua</button>
+  </div>
+
+  <div id="tableContainer">
+    <div class="empty-state">
+      <p>Belum ada data. Upload file PDF Faktur Pajak Coretax untuk memulai.</p>
+    </div>
+  </div>
+
+  <div class="log-panel" id="logPanel" style="display:none">
+    <div class="log-header" onclick="toggleLog()">
+      <span>📋 Log Proses</span>
+      <span id="logToggle">▼</span>
+    </div>
+    <div class="log-body" id="logBody"></div>
+  </div>
+</div>
+
+<div class="processing" id="processing">
+  <div class="spinner"></div>
+  <div class="processing-text" id="processingText">Memproses file PDF...</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<footer>
+  Coretax Faktur Pajak Converter · Data diproses 100% di browser, tidak ada yang dikirim ke server
+</footer>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+let allFaktur = [];
+
+// Drop zone events
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+
+['dragenter','dragover'].forEach(e => {
+  dropzone.addEventListener(e, ev => { ev.preventDefault(); dropzone.classList.add('dragover'); });
+});
+['dragleave','drop'].forEach(e => {
+  dropzone.addEventListener(e, ev => { ev.preventDefault(); dropzone.classList.remove('dragover'); });
+});
+dropzone.addEventListener('drop', ev => {
+  const files = [...ev.dataTransfer.files].filter(f => f.type === 'application/pdf');
+  if (files.length) processFiles(files);
+});
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', ev => {
+  const files = [...ev.target.files];
+  if (files.length) processFiles(files);
+  fileInput.value = '';
+});
+
+function log(msg, type = '') {
+  const logPanel = document.getElementById('logPanel');
+  const logBody = document.getElementById('logBody');
+  logPanel.style.display = 'block';
+  logBody.classList.add('open');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry ' + type;
+  entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logBody.appendChild(entry);
+  logBody.scrollTop = logBody.scrollHeight;
+}
+
+function toggleLog() {
+  const lb = document.getElementById('logBody');
+  lb.classList.toggle('open');
+  document.getElementById('logToggle').textContent = lb.classList.contains('open') ? '▲' : '▼';
+}
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type;
+  setTimeout(() => t.classList.add('show'), 10);
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function showProcessing(show, text) {
+  const p = document.getElementById('processing');
+  p.classList.toggle('active', show);
+  if (text) document.getElementById('processingText').textContent = text;
+}
+
+async function processFiles(files) {
+  showProcessing(true, `Memproses ${files.length} file...`);
+  let successCount = 0;
+
+  for (const file of files) {
+    try {
+      log(`Memproses: ${file.name}`, 'info');
+      showProcessing(true, `Membaca ${file.name}...`);
+
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const lines = [];
+        let lastY = null;
+        let currentLine = '';
+
+        for (const item of content.items) {
+          if (lastY !== null && Math.abs(item.transform[5] - lastY) > 3) {
+            lines.push(currentLine.trim());
+            currentLine = '';
+          }
+          currentLine += item.str;
+          lastY = item.transform[5];
+        }
+        if (currentLine.trim()) lines.push(currentLine.trim());
+        fullText += lines.join('\n') + '\n';
+      }
+
+      const faktur = parseFakturCoretax(fullText, file.name);
+      if (faktur) {
+        allFaktur.push(faktur);
+        log(`✓ Berhasil: ${faktur.noFaktur} — DPP: ${formatRp(faktur.dpp)}`, 'success');
+        successCount++;
+      } else {
+        log(`✗ Gagal parse: ${file.name} — format tidak dikenali`, 'error');
+      }
+    } catch (err) {
+      log(`✗ Error: ${file.name} — ${err.message}`, 'error');
+    }
+  }
+
+  showProcessing(false);
+  if (successCount > 0) {
+    showToast(`${successCount} faktur berhasil diproses!`);
+  } else {
+    showToast('Tidak ada faktur yang berhasil diproses', 'error');
+  }
+  renderTable();
+  updateStats();
+}
+
+function parseFakturCoretax(text, fileName) {
+  const result = {
+    fileName,
+    noFaktur: '',
+    tanggal: '',
+    // PKP (Penjual)
+    namaPKP: '',
+    alamatPKP: '',
+    npwpPKP: '',
+    // Pembeli
+    namaPembeli: '',
+    alamatPembeli: '',
+    npwpPembeli: '',
+    // Totals
+    hargaJual: 0,
+    potongan: 0,
+    dpp: 0,
+    ppn: 0,
+    ppnbm: 0,
+    // Items
+    items: [],
+    keterangan: '',
+    penandatangan: '',
+    referensi: ''
+  };
+
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+
+  // --- Detect format: Coretax (new) vs eFaktur (old) ---
+  const isCoretax = text.includes('Kode\nBarang') || text.includes('Kode Barang') || 
+                     text.includes('04002') || text.includes('NIK') ||
+                     text.includes('Jumlah PPN') || text.includes('Ditandatangani secara elektronik');
+  
+  // No Faktur
+  let noFakturMatch = text.match(/Kode dan Nomor Seri Faktur Pajak\s*[:\s]+([0-9\-\.]+)/i);
+  if (noFakturMatch) result.noFaktur = noFakturMatch[1].trim();
+
+  // Tanggal - try multiple patterns
+  let tglMatch = text.match(/(?:KOTA\s+\w+|SURABAYA|JAKARTA|SEMARANG|BANDUNG|MEDAN|SIDOARJO)[,\s]+(\d{1,2}\s+\w+\s+\d{4})/i);
+  if (tglMatch) result.tanggal = tglMatch[1].trim();
+  if (!result.tanggal) {
+    tglMatch = text.match(/(\d{1,2}\s+(?:Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4})/i);
+    if (tglMatch) result.tanggal = tglMatch[1].trim();
+  }
+
+  // PKP / Penjual
+  let pkpSection = false, pembeliSection = false;
+  let collectPKPAddr = false, collectPembeliAddr = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const nextLine = i + 1 < lines.length ? lines[i + 1] : '';
+
+    if (/^Pengusaha Kena Pajak/i.test(line)) { pkpSection = true; pembeliSection = false; continue; }
+    if (/^Pembeli Barang Kena Pajak/i.test(line)) { pembeliSection = true; pkpSection = false; continue; }
+    if (/^No\.\s/i.test(line) || /^Kode$/i.test(line) || /^Harga Jual/i.test(line)) { pkpSection = false; pembeliSection = false; }
+
+    if (pkpSection) {
+      let nameM = line.match(/^Nama\s*:\s*(.+)/i);
+      if (nameM && !result.namaPKP) { result.namaPKP = nameM[1].trim(); continue; }
+      let addrM = line.match(/^Alamat\s*:\s*(.+)/i);
+      if (addrM && !result.alamatPKP) { 
+        result.alamatPKP = addrM[1].trim(); 
+        collectPKPAddr = true; 
+        continue; 
+      }
+      if (collectPKPAddr && !/^NPWP/i.test(line) && !/^Nama/i.test(line) && !/^Pembeli/i.test(line)) {
+        result.alamatPKP += ' ' + line;
+        continue;
+      }
+      collectPKPAddr = false;
+      let npwpM = line.match(/^NPWP\s*:\s*(.+)/i);
+      if (npwpM && !result.npwpPKP) { result.npwpPKP = npwpM[1].trim(); continue; }
+    }
+
+    if (pembeliSection) {
+      let nameM = line.match(/^Nama\s*:\s*(.+)/i);
+      if (nameM && !result.namaPembeli) { result.namaPembeli = nameM[1].trim(); continue; }
+      let addrM = line.match(/^Alamat\s*:\s*(.+)/i);
+      if (addrM && !result.alamatPembeli) { 
+        result.alamatPembeli = addrM[1].trim(); 
+        collectPembeliAddr = true; 
+        continue; 
+      }
+      if (collectPembeliAddr && !/^NPWP/i.test(line) && !/^NIK/i.test(line) && !/^Nama/i.test(line)) {
+        result.alamatPembeli += ' ' + line;
+        continue;
+      }
+      collectPembeliAddr = false;
+      let npwpM = line.match(/^NPWP\s*:\s*(.+)/i);
+      if (npwpM && !result.npwpPembeli) { result.npwpPembeli = npwpM[1].trim(); continue; }
+    }
+  }
+
+  // Parse numeric values
+  const parseNum = (s) => {
+    if (!s) return 0;
+    return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
+  };
+
+  // DPP, PPN, PPnBM, Harga Jual
+  let hjMatch = text.match(/Harga Jual\s*\/\s*Penggantian(?:\s*\/\s*Uang Muka\s*\/\s*Termin)?\s+([\d\.,]+)/i);
+  // Try the last occurrence for the total
+  const hjMatches = [...text.matchAll(/Harga Jual\s*\/\s*Penggantian(?:\s*\/\s*Uang Muka\s*\/\s*Termin)?\s+([\d\.,]+)/gi)];
+  if (hjMatches.length > 0) result.hargaJual = parseNum(hjMatches[hjMatches.length - 1][1]);
+
+  let potMatch = text.match(/Dikurangi Potongan Harga\s+([\d\.,]+)/i);
+  if (potMatch) result.potongan = parseNum(potMatch[1]);
+
+  let dppMatch = text.match(/Dasar Pengenaan Pajak\s+([\d\.,]+)/i);
+  if (dppMatch) result.dpp = parseNum(dppMatch[1]);
+
+  // PPN - handle both Coretax "Jumlah PPN" and old "Total PPN"
+  let ppnMatch = text.match(/(?:Jumlah|Total)\s+PPN\s*(?:\(Pajak Pertambahan Nilai\))?\s+([\d\.,]+)/i);
+  if (ppnMatch) result.ppn = parseNum(ppnMatch[1]);
+
+  let ppnbmMatch = text.match(/(?:Jumlah|Total)\s+PPnBM\s*(?:\(Pajak Penjualan (?:atas )?Barang Mewah\))?\s+([\d\.,]+)/i);
+  if (ppnbmMatch) result.ppnbm = parseNum(ppnbmMatch[1]);
+
+  // Parse line items - Coretax format
+  // Look for patterns like: number, kode barang, nama, then price
+  const itemPattern = /(\d+)\s+(\d{4,6})\s+(.+?)(?:\n|$)/g;
+  
+  // Better approach: scan for item blocks
+  let itemBlocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    // Coretax: starts with a number, then kode barang (6 digits)
+    let itemStart = lines[i].match(/^(\d+)\s+(\d{4,6})$/);
+    if (!itemStart) itemStart = lines[i].match(/^(\d+)\s+(\d{4,6})\s+(.+)/);
+    
+    if (itemStart) {
+      let itemNo = parseInt(itemStart[1]);
+      let kodeBarang = itemStart[2];
+      let namaBarang = itemStart[3] || '';
+      let harga = 0;
+      let qty = 0;
+      let unit = '';
+      let jumlah = 0;
+      
+      // Read subsequent lines for this item
+      for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+        let l = lines[j];
+        // If it's the next item or a total line, stop
+        if (/^\d+\s+\d{4,6}/.test(l)) break;
+        if (/^Harga Jual/i.test(l)) break;
+        
+        // Nama barang
+        if (!namaBarang && l && !/^Rp\s/i.test(l) && !/^Potongan/i.test(l) && !/^PPnBM/i.test(l)) {
+          namaBarang = l;
+        }
+        
+        // Price x Qty pattern: "Rp 2.900.000,00 x 1,00 Unit"
+        let pqMatch = l.match(/Rp\s+([\d\.,]+)\s*x\s*([\d\.,]+)\s*(\w*)/i);
+        if (pqMatch) {
+          harga = parseNum(pqMatch[1]);
+          qty = parseNum(pqMatch[2]);
+          unit = pqMatch[3] || '';
+        }
+        
+        // Jumlah at end of line (right-aligned value)
+        let jumlahMatch = l.match(/([\d\.,]+),\d{2}$/);
+        if (jumlahMatch && !pqMatch) {
+          jumlah = parseNum(jumlahMatch[0]);
+        }
+      }
+      
+      // If jumlah is 0, calculate it
+      if (jumlah === 0 && harga && qty) {
+        jumlah = Math.round(harga * qty);
+      }
+      
+      // For the last value on the item-start line itself (Coretax puts amount at end)
+      let endValMatch = lines[i].match(/([\d\.]+,\d{2})$/);
+      if (endValMatch && !jumlah) {
+        jumlah = parseNum(endValMatch[1]);
+      }
+
+      itemBlocks.push({ no: itemNo, kodeBarang, namaBarang, harga, qty, unit, jumlah });
+    }
+  }
+
+  // Also try old eFaktur format: item lines like "1 ... UDANG ... 392.539.206,00"
+  if (itemBlocks.length === 0) {
+    // Old format items
+    for (let i = 0; i < lines.length; i++) {
+      let l = lines[i];
+      // Pattern: starts with number, then has a big value at the end
+      let oldMatch = l.match(/^(\d+)\s+([\d\.,]+),\d{2}$/);
+      if (oldMatch) {
+        let no = parseInt(oldMatch[1]);
+        let jumlah = parseNum(l.match(/([\d\.]+,\d{2})$/)[0]);
+        let namaBarang = '';
+        let harga = 0, qty = 0;
+        
+        // Next line should have name and Rp x qty
+        if (i + 1 < lines.length) {
+          let nextL = lines[i + 1];
+          let nameAndPrice = nextL.match(/^(.+?)\s*$/);
+          if (nameAndPrice) namaBarang = nameAndPrice[1];
+        }
+        if (i + 2 < lines.length) {
+          let priceL = lines[i + 2];
+          let pqM = priceL.match(/Rp\s*([\d\.,]+)\s*x\s*([\d\.,]+)/i);
+          if (pqM) { harga = parseNum(pqM[1]); qty = parseNum(pqM[2]); }
+        }
+        
+        itemBlocks.push({ no, kodeBarang: '', namaBarang, harga, qty, unit: '', jumlah });
+      }
+    }
+  }
+
+  // Deduplicate: if we got the jumlah from the summary line, match it
+  // Also look for the total line amount to grab item amounts
+  if (itemBlocks.length === 0) {
+    // Last resort: parse from the structured text more carefully
+    // Look for numbered items with amounts
+    const itemRegex = /^(\d+)\s+(\d+)?\s*\n?(.+?)\n.*?Rp\s+([\d\.,]+)\s*x\s*([\d\.,]+)\s*(\w*)/gm;
+    let m;
+    while ((m = itemRegex.exec(text)) !== null) {
+      itemBlocks.push({
+        no: parseInt(m[1]),
+        kodeBarang: m[2] || '',
+        namaBarang: m[3].trim(),
+        harga: parseNum(m[4]),
+        qty: parseNum(m[5]),
+        unit: m[6] || '',
+        jumlah: Math.round(parseNum(m[4]) * parseNum(m[5]))
+      });
+    }
+  }
+
+  result.items = itemBlocks;
+
+  // If we still have no items but have DPP, create a single-item entry
+  if (result.items.length === 0 && result.dpp > 0) {
+    result.items.push({
+      no: 1, kodeBarang: '', namaBarang: '(tidak terbaca)', 
+      harga: result.hargaJual || result.dpp, qty: 1, unit: '', 
+      jumlah: result.hargaJual || result.dpp
+    });
+  }
+
+  // Penandatangan & Referensi
+  let signMatch = text.match(/Ditandatangani secara elektronik\s*\n?\s*([A-Z\s]+)/i);
+  if (signMatch) result.penandatangan = signMatch[1].trim();
+  if (!result.penandatangan) {
+    // Old format: name after date line
+    let nameLines = text.match(/PRAJITNO|[A-Z]{2,}\s+[A-Z]{2,}$/gm);
+    if (nameLines) result.penandatangan = nameLines[nameLines.length - 1];
+  }
+
+  let refMatch = text.match(/\(Referensi:\s*(.+?)\)/i);
+  if (refMatch) result.referensi = refMatch[1].trim();
+
+  // Keterangan
+  if (/PPN DIBEBASKAN/i.test(text)) {
+    let ppMatch = text.match(/PP\s*(?:NOMOR\s*)?(\d+\s*TAHUN\s*\d+)/i);
+    result.keterangan = 'PPN Dibebaskan' + (ppMatch ? ' PP ' + ppMatch[1] : '');
+  } else if (/080\./i.test(result.noFaktur)) {
+    result.keterangan = 'PPN Dibebaskan';
+  }
+
+  // Validate
+  if (!result.noFaktur && !result.dpp) return null;
+  return result;
+}
+
+function formatRp(n) {
+  return new Intl.NumberFormat('id-ID').format(n);
+}
+
+function formatRpShort(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'M';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'Jt';
+  if (n >= 1e3) return (n / 1e3).toFixed(0) + 'Rb';
+  return n.toString();
+}
+
+function updateStats() {
+  const show = allFaktur.length > 0;
+  document.getElementById('statsBar').style.display = show ? 'grid' : 'none';
+  document.getElementById('actionBar').style.display = show ? 'flex' : 'none';
+
+  if (!show) return;
+
+  const totalItems = allFaktur.reduce((s, f) => s + f.items.length, 0);
+  const totalDPP = allFaktur.reduce((s, f) => s + f.dpp, 0);
+  const totalPPN = allFaktur.reduce((s, f) => s + f.ppn, 0);
+
+  document.getElementById('statFiles').textContent = allFaktur.length;
+  document.getElementById('statItems').textContent = totalItems;
+  document.getElementById('statDPP').textContent = formatRpShort(totalDPP);
+  document.getElementById('statPPN').textContent = formatRpShort(totalPPN);
+}
+
+function renderTable() {
+  if (allFaktur.length === 0) {
+    document.getElementById('tableContainer').innerHTML = '<div class="empty-state"><p>Belum ada data.</p></div>';
+    return;
+  }
+
+  let html = `<div class="table-wrap"><div class="table-scroll"><table>
+    <thead><tr>
+      <th>#</th>
+      <th>No. Faktur</th>
+      <th>Tanggal</th>
+      <th>PKP / Penjual</th>
+      <th>Pembeli</th>
+      <th>Barang</th>
+      <th class="text-right">Harga Jual</th>
+      <th class="text-right">DPP</th>
+      <th class="text-right">PPN</th>
+      <th>Ket</th>
+      <th></th>
+    </tr></thead><tbody>`;
+
+  allFaktur.forEach((f, idx) => {
+    const barangSummary = f.items.map(it => it.namaBarang).filter(Boolean).join(', ');
+    html += `<tr>
+      <td class="text-center">${idx + 1}</td>
+      <td class="mono">${f.noFaktur || '-'}</td>
+      <td>${f.tanggal || '-'}</td>
+      <td title="${f.alamatPKP}">${f.namaPKP || '-'}</td>
+      <td title="${f.alamatPembeli}">${f.namaPembeli || '-'}</td>
+      <td title="${barangSummary}">${barangSummary.substring(0, 30) || '-'}${barangSummary.length > 30 ? '…' : ''}</td>
+      <td class="text-right mono">${formatRp(f.hargaJual)}</td>
+      <td class="text-right mono">${formatRp(f.dpp)}</td>
+      <td class="text-right mono">${formatRp(f.ppn)}</td>
+      <td>${f.keterangan ? `<span class="badge badge-info">${f.keterangan.substring(0,20)}</span>` : ''}</td>
+      <td><button class="btn-row-delete" onclick="deleteFaktur(${idx})" title="Hapus">✕</button></td>
+    </tr>`;
+  });
+
+  // Total row
+  const totalHJ = allFaktur.reduce((s, f) => s + f.hargaJual, 0);
+  const totalDPP = allFaktur.reduce((s, f) => s + f.dpp, 0);
+  const totalPPN = allFaktur.reduce((s, f) => s + f.ppn, 0);
+  html += `<tr style="background:var(--surface2);font-weight:600">
+    <td colspan="6" class="text-center">TOTAL (${allFaktur.length} Faktur)</td>
+    <td class="text-right mono">${formatRp(totalHJ)}</td>
+    <td class="text-right mono">${formatRp(totalDPP)}</td>
+    <td class="text-right mono">${formatRp(totalPPN)}</td>
+    <td colspan="2"></td>
+  </tr>`;
+
+  html += '</tbody></table></div></div>';
+  document.getElementById('tableContainer').innerHTML = html;
+}
+
+function deleteFaktur(idx) {
+  const name = allFaktur[idx].noFaktur || allFaktur[idx].fileName;
+  allFaktur.splice(idx, 1);
+  renderTable();
+  updateStats();
+  showToast(`Faktur ${name} dihapus`);
+}
+
+function clearAll() {
+  if (!confirm('Hapus semua data?')) return;
+  allFaktur = [];
+  renderTable();
+  updateStats();
+  showToast('Semua data dihapus');
+}
+
+function exportExcel() {
+  if (allFaktur.length === 0) return;
+
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Rekap
+  const rekapData = [
+    ['REKAP FAKTUR PAJAK'],
+    ['Tanggal Export: ' + new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })],
+    [],
+    ['No', 'No. Faktur Pajak', 'Tanggal', 'PKP / Penjual', 'NPWP PKP', 'Pembeli', 'NPWP Pembeli', 'Harga Jual (Rp)', 'Potongan (Rp)', 'DPP (Rp)', 'PPN (Rp)', 'PPnBM (Rp)', 'Keterangan', 'Referensi', 'Penandatangan']
+  ];
+
+  allFaktur.forEach((f, i) => {
+    rekapData.push([
+      i + 1,
+      f.noFaktur,
+      f.tanggal,
+      f.namaPKP,
+      f.npwpPKP,
+      f.namaPembeli,
+      f.npwpPembeli,
+      f.hargaJual,
+      f.potongan,
+      f.dpp,
+      f.ppn,
+      f.ppnbm,
+      f.keterangan,
+      f.referensi,
+      f.penandatangan
+    ]);
+  });
+
+  // Total row
+  const lastRow = rekapData.length;
+  rekapData.push([
+    '', 'TOTAL', '', '', '', '', '',
+    { t: 'n', f: `SUM(H5:H${lastRow})` },
+    { t: 'n', f: `SUM(I5:I${lastRow})` },
+    { t: 'n', f: `SUM(J5:J${lastRow})` },
+    { t: 'n', f: `SUM(K5:K${lastRow})` },
+    { t: 'n', f: `SUM(L5:L${lastRow})` },
+    '', '', ''
+  ]);
+
+  const wsRekap = XLSX.utils.aoa_to_sheet(rekapData);
+  
+  // Column widths
+  wsRekap['!cols'] = [
+    {wch:5}, {wch:25}, {wch:20}, {wch:30}, {wch:20}, {wch:30}, {wch:20},
+    {wch:18}, {wch:15}, {wch:18}, {wch:15}, {wch:15}, {wch:25}, {wch:25}, {wch:20}
+  ];
+
+  // Number format for currency columns
+  const numFmt = '#,##0';
+  for (let r = 4; r <= lastRow; r++) {
+    ['H','I','J','K','L'].forEach(c => {
+      const ref = c + (r + 1);
+      if (wsRekap[ref]) wsRekap[ref].z = numFmt;
+    });
+  }
+
+  XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekap Faktur Pajak');
+
+  // Sheet 2: Detail Items
+  const detailData = [
+    ['DETAIL LINE ITEMS FAKTUR PAJAK'],
+    [],
+    ['No', 'No. Faktur', 'Tanggal', 'Item', 'Kode Barang', 'Nama Barang / Jasa', 'Harga Satuan (Rp)', 'Kuantitas', 'Satuan', 'Jumlah (Rp)']
+  ];
+
+  let itemNo = 0;
+  allFaktur.forEach(f => {
+    f.items.forEach(item => {
+      itemNo++;
+      detailData.push([
+        itemNo,
+        f.noFaktur,
+        f.tanggal,
+        item.no,
+        item.kodeBarang,
+        item.namaBarang,
+        item.harga,
+        item.qty,
+        item.unit,
+        item.jumlah
+      ]);
+    });
+  });
+
+  const detailLastRow = detailData.length;
+  detailData.push([
+    '', 'TOTAL', '', '', '', '', '', '', '',
+    { t: 'n', f: `SUM(J4:J${detailLastRow})` }
+  ]);
+
+  const wsDetail = XLSX.utils.aoa_to_sheet(detailData);
+  wsDetail['!cols'] = [
+    {wch:5}, {wch:25}, {wch:20}, {wch:6}, {wch:12}, {wch:35}, {wch:18}, {wch:12}, {wch:10}, {wch:18}
+  ];
+
+  for (let r = 3; r <= detailLastRow; r++) {
+    ['G','H','J'].forEach(c => {
+      const ref = c + (r + 1);
+      if (wsDetail[ref]) wsDetail[ref].z = numFmt;
+    });
+  }
+
+  XLSX.utils.book_append_sheet(wb, wsDetail, 'Detail Items');
+
+  // Sheet 3: Info PKP & Pembeli
+  const infoData = [
+    ['INFORMASI PKP & PEMBELI'],
+    [],
+    ['No. Faktur', 'Nama PKP', 'Alamat PKP', 'NPWP PKP', 'Nama Pembeli', 'Alamat Pembeli', 'NPWP Pembeli']
+  ];
+
+  allFaktur.forEach(f => {
+    infoData.push([
+      f.noFaktur, f.namaPKP, f.alamatPKP, f.npwpPKP,
+      f.namaPembeli, f.alamatPembeli, f.npwpPembeli
+    ]);
+  });
+
+  const wsInfo = XLSX.utils.aoa_to_sheet(infoData);
+  wsInfo['!cols'] = [{wch:25},{wch:30},{wch:50},{wch:20},{wch:30},{wch:50},{wch:20}];
+  XLSX.utils.book_append_sheet(wb, wsInfo, 'Info PKP & Pembeli');
+
+  // Generate filename
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0,10).replace(/-/g,'');
+  const filename = `Rekap_Faktur_Pajak_${dateStr}.xlsx`;
+
+  XLSX.writeFile(wb, filename);
+  showToast(`File ${filename} berhasil di-download!`);
+  log(`Export berhasil: ${filename} (${allFaktur.length} faktur, ${itemNo} items)`, 'success');
+}
+</script>
+</body>
+</html>
