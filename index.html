@@ -464,55 +464,114 @@ h1 {
   border: none;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+/* Complete the flex chain: tableOuter → tableContainer → tableWrap → tableScroll */
+.table-outer.maximized #tableContainer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .table-outer.maximized .table-scroll {
   flex: 1;
   max-height: none;
-  overflow-x: hidden;
+  min-height: 0;
+  overflow-x: auto;
   overflow-y: auto;
 }
+/* Custom scrollbar for maximized view */
+.table-outer.maximized .table-scroll::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+.table-outer.maximized .table-scroll::-webkit-scrollbar-track {
+  background: var(--surface);
+  border-radius: 5px;
+}
+.table-outer.maximized .table-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+  border: 2px solid var(--surface);
+}
+.table-outer.maximized .table-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+.table-outer.maximized .table-scroll::-webkit-scrollbar-corner {
+  background: var(--surface);
+}
 .table-outer.maximized table {
-  table-layout: fixed;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
 }
 .table-outer.maximized thead th,
 .table-outer.maximized tbody td {
-  white-space: normal;
-  word-wrap: break-word;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 10px 10px;
+  white-space: nowrap;
+  padding: 10px 14px;
 }
-/* Column width distribution for maximized view (12 columns) */
+/* Natural min-widths per column for comfortable reading */
 .table-outer.maximized thead th:nth-child(1),
-.table-outer.maximized tbody td:nth-child(1) { width: 3%; }    /* # */
+.table-outer.maximized tbody td:nth-child(1) { min-width: 45px; }     /* # */
 .table-outer.maximized thead th:nth-child(2),
-.table-outer.maximized tbody td:nth-child(2) { width: 12%; }   /* No. Faktur */
+.table-outer.maximized tbody td:nth-child(2) { min-width: 180px; }    /* No. Faktur */
 .table-outer.maximized thead th:nth-child(3),
-.table-outer.maximized tbody td:nth-child(3) { width: 8%; }    /* Tanggal */
+.table-outer.maximized tbody td:nth-child(3) { min-width: 110px; }    /* Tanggal */
 .table-outer.maximized thead th:nth-child(4),
-.table-outer.maximized tbody td:nth-child(4) { width: 14%; }   /* PKP/Penjual */
+.table-outer.maximized tbody td:nth-child(4) { min-width: 200px; max-width: 320px; white-space: normal; }   /* PKP/Penjual */
 .table-outer.maximized thead th:nth-child(5),
-.table-outer.maximized tbody td:nth-child(5) { width: 13%; }   /* Pembeli */
+.table-outer.maximized tbody td:nth-child(5) { min-width: 200px; max-width: 320px; white-space: normal; }   /* Pembeli */
 .table-outer.maximized thead th:nth-child(6),
-.table-outer.maximized tbody td:nth-child(6) { width: 12%; }   /* Barang/Jasa */
+.table-outer.maximized tbody td:nth-child(6) { min-width: 180px; max-width: 300px; white-space: normal; }   /* Barang/Jasa */
 .table-outer.maximized thead th:nth-child(7),
-.table-outer.maximized tbody td:nth-child(7) { width: 5%; }    /* Jenis */
+.table-outer.maximized tbody td:nth-child(7) { min-width: 70px; }     /* Jenis */
 .table-outer.maximized thead th:nth-child(8),
-.table-outer.maximized tbody td:nth-child(8) { width: 10%; }   /* Harga Jual */
+.table-outer.maximized tbody td:nth-child(8) { min-width: 130px; }    /* Harga Jual */
 .table-outer.maximized thead th:nth-child(9),
-.table-outer.maximized tbody td:nth-child(9) { width: 9%; }    /* DPP */
+.table-outer.maximized tbody td:nth-child(9) { min-width: 130px; }    /* DPP */
 .table-outer.maximized thead th:nth-child(10),
-.table-outer.maximized tbody td:nth-child(10) { width: 8%; }   /* PPN */
+.table-outer.maximized tbody td:nth-child(10) { min-width: 120px; }   /* PPN */
 .table-outer.maximized thead th:nth-child(11),
-.table-outer.maximized tbody td:nth-child(11) { width: 3.5%; } /* Ket */
+.table-outer.maximized tbody td:nth-child(11) { min-width: 60px; }    /* Ket */
 .table-outer.maximized thead th:nth-child(12),
-.table-outer.maximized tbody td:nth-child(12) { width: 2.5%; } /* Delete */
+.table-outer.maximized tbody td:nth-child(12) { min-width: 45px; }    /* Delete */
+/* Sticky first column for reference while scrolling */
+.table-outer.maximized thead th:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--surface);
+}
+.table-outer.maximized tbody td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
+}
 .table-outer.maximized .pagination-wrap {
   border-radius: 0;
   border-left: none;
   border-right: none;
   border-bottom: none;
+}
+/* Scroll hint indicator */
+.table-outer.maximized .table-wrap::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 32px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, rgba(0,0,0,0.06));
+  opacity: 1;
+  transition: opacity 0.3s;
+}
+.table-outer.maximized .table-wrap.scrolled-end::after {
+  opacity: 0;
+}
+.table-outer.maximized .table-wrap {
+  position: relative;
 }
 /* Placeholder keeps layout stable when table is moved to body */
 .table-outer-placeholder {
@@ -3867,6 +3926,20 @@ function toggleTableMaximize() {
 
     if (icoMax) icoMax.style.display = 'none';
     if (icoRes) icoRes.style.display = 'block';
+
+    // Setup scroll hint - fade out right shadow when scrolled to end
+    var scrollEl = outer.querySelector('.table-scroll');
+    var wrapEl = outer.querySelector('.table-wrap');
+    if (scrollEl && wrapEl) {
+      var onScroll = function() {
+        var atEnd = scrollEl.scrollLeft + scrollEl.clientWidth >= scrollEl.scrollWidth - 2;
+        wrapEl.classList.toggle('scrolled-end', atEnd);
+      };
+      scrollEl.addEventListener('scroll', onScroll);
+      scrollEl._maxScrollHandler = onScroll;
+      // Check initial state
+      setTimeout(onScroll, 100);
+    }
   } else {
     // === RESTORE: animate out, then move back ===
     outer.classList.add('restoring');
@@ -3876,6 +3949,15 @@ function toggleTableMaximize() {
       outer.removeEventListener('animationend', handler);
       outer.classList.remove('maximized', 'restoring');
       document.body.style.overflow = '';
+
+      // Remove scroll handler
+      var scrollEl = outer.querySelector('.table-scroll');
+      var wrapEl = outer.querySelector('.table-wrap');
+      if (scrollEl && scrollEl._maxScrollHandler) {
+        scrollEl.removeEventListener('scroll', scrollEl._maxScrollHandler);
+        delete scrollEl._maxScrollHandler;
+      }
+      if (wrapEl) wrapEl.classList.remove('scrolled-end');
 
       if (icoMax) icoMax.style.display = 'block';
       if (icoRes) icoRes.style.display = 'none';
