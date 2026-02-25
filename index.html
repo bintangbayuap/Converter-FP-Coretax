@@ -589,6 +589,103 @@ footer {
   font-size: 0.75rem;
 }
 
+/* Pagination */
+.pagination-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  font-size: 0.8125rem;
+}
+
+.pagination-info {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pagination-info select {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.pagination-info select:hover,
+.pagination-info select:focus {
+  border-color: var(--accent);
+}
+
+.pagination-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.page-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.page-btn:hover:not(:disabled):not(.active) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(245,158,11,0.08);
+}
+
+.page-btn.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #000;
+  border-color: transparent;
+  font-weight: 700;
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.page-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.page-ellipsis {
+  color: var(--text-dim);
+  padding: 0 4px;
+  font-size: 0.75rem;
+  user-select: none;
+}
+
+.pagination-summary {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .container { padding: 16px; }
@@ -596,6 +693,8 @@ footer {
   .dropzone { padding: 40px 20px; }
   .action-bar { flex-direction: column; }
   .btn { justify-content: center; }
+  .pagination-wrap { flex-direction: column; align-items: center; gap: 10px; }
+  .pagination-nav { flex-wrap: wrap; justify-content: center; }
 }
 
 /* Large screens — keep things tight */
@@ -2775,6 +2874,8 @@ function detectJenisFromCode(code) {
 })();
 
 let allFaktur = [];
+let currentPage = 1;
+let rowsPerPage = 50;
 document.getElementById('footerYear').textContent = new Date().getFullYear();
 
 // Ripple effect for all buttons
@@ -3320,7 +3421,15 @@ function renderTable() {
     return;
   }
 
-  let html = `<div class="table-wrap"><div class="table-scroll"><table>
+  const totalPages = Math.ceil(allFaktur.length / rowsPerPage);
+  if (currentPage > totalPages) currentPage = totalPages;
+  if (currentPage < 1) currentPage = 1;
+
+  const startIdx = (currentPage - 1) * rowsPerPage;
+  const endIdx = Math.min(startIdx + rowsPerPage, allFaktur.length);
+  const pageData = allFaktur.slice(startIdx, endIdx);
+
+  let html = `<div class="table-wrap" style="border-radius:var(--radius) var(--radius) 0 0"><div class="table-scroll"><table>
     <thead><tr>
       <th>#</th>
       <th>No. Faktur</th>
@@ -3336,10 +3445,11 @@ function renderTable() {
       <th></th>
     </tr></thead><tbody>`;
 
-  allFaktur.forEach((f, idx) => {
+  pageData.forEach((f, i) => {
+    const globalIdx = startIdx + i;
     const barangSummary = f.items.map(it => it.namaBarang).filter(Boolean).join(', ');
     html += `<tr>
-      <td class="text-center">${idx + 1}</td>
+      <td class="text-center">${globalIdx + 1}</td>
       <td class="mono">${f.noFaktur || '-'}</td>
       <td>${f.tanggal || '-'}</td>
       <td title="${f.alamatPKP}">${f.namaPKP || '-'}</td>
@@ -3350,16 +3460,16 @@ function renderTable() {
       <td class="text-right mono">${formatRp(f.dpp)}</td>
       <td class="text-right mono">${formatRp(f.ppn)}</td>
       <td>${f.keterangan ? `<span class="badge badge-info">${f.keterangan.substring(0,20)}</span>` : ''}</td>
-      <td><button class="btn-row-delete" onclick="deleteFaktur(${idx})" title="Hapus">✕</button></td>
+      <td><button class="btn-row-delete" onclick="deleteFaktur(${globalIdx})" title="Hapus">✕</button></td>
     </tr>`;
   });
 
-  // Total row
+  // Total row (always show grand total of ALL data)
   const totalHJ = allFaktur.reduce((s, f) => s + f.hargaJual, 0);
   const totalDPP = allFaktur.reduce((s, f) => s + f.dpp, 0);
   const totalPPN = allFaktur.reduce((s, f) => s + f.ppn, 0);
   html += `<tr style="background:var(--surface2);font-weight:600">
-    <td colspan="6" class="text-center">TOTAL (${allFaktur.length} Faktur)</td>
+    <td colspan="7" class="text-center">TOTAL (${allFaktur.length} Faktur)</td>
     <td class="text-right mono">${formatRp(totalHJ)}</td>
     <td class="text-right mono">${formatRp(totalDPP)}</td>
     <td class="text-right mono">${formatRp(totalPPN)}</td>
@@ -3367,12 +3477,96 @@ function renderTable() {
   </tr>`;
 
   html += '</tbody></table></div></div>';
+
+  // Pagination controls
+  if (totalPages > 1) {
+    html += `<div class="pagination-wrap">
+      <div class="pagination-info">
+        <span>Menampilkan ${startIdx + 1}–${endIdx} dari ${allFaktur.length} faktur</span>
+        <span>| Baris/hal:</span>
+        <select onchange="changeRowsPerPage(this.value)">
+          ${[25, 50, 100, 200, 500].map(n => `<option value="${n}" ${n === rowsPerPage ? 'selected' : ''}>${n}</option>`).join('')}
+        </select>
+      </div>
+      <div class="pagination-nav">
+        <button class="page-btn" onclick="goToPage(1)" ${currentPage === 1 ? 'disabled' : ''} title="Halaman pertama">«</button>
+        <button class="page-btn" onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} title="Sebelumnya">‹</button>
+        ${buildPageButtons(currentPage, totalPages)}
+        <button class="page-btn" onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} title="Berikutnya">›</button>
+        <button class="page-btn" onclick="goToPage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''} title="Halaman terakhir">»</button>
+      </div>
+    </div>`;
+  } else if (allFaktur.length > 25) {
+    // Show rows-per-page selector even on single page if there's enough data
+    html += `<div class="pagination-wrap">
+      <div class="pagination-info">
+        <span>Menampilkan semua ${allFaktur.length} faktur</span>
+        <span>| Baris/hal:</span>
+        <select onchange="changeRowsPerPage(this.value)">
+          ${[25, 50, 100, 200, 500].map(n => `<option value="${n}" ${n === rowsPerPage ? 'selected' : ''}>${n}</option>`).join('')}
+        </select>
+      </div>
+    </div>`;
+  }
+
   document.getElementById('tableContainer').innerHTML = html;
+}
+
+function buildPageButtons(current, total) {
+  const pages = [];
+  const delta = 2; // how many pages around current to show
+
+  let rangeStart = Math.max(2, current - delta);
+  let rangeEnd = Math.min(total - 1, current + delta);
+
+  // Always show page 1
+  pages.push(`<button class="page-btn ${current === 1 ? 'active' : ''}" onclick="goToPage(1)">1</button>`);
+
+  // Ellipsis after page 1
+  if (rangeStart > 2) {
+    pages.push('<span class="page-ellipsis">…</span>');
+  }
+
+  // Middle pages
+  for (let i = rangeStart; i <= rangeEnd; i++) {
+    pages.push(`<button class="page-btn ${i === current ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`);
+  }
+
+  // Ellipsis before last page
+  if (rangeEnd < total - 1) {
+    pages.push('<span class="page-ellipsis">…</span>');
+  }
+
+  // Always show last page (if more than 1 page)
+  if (total > 1) {
+    pages.push(`<button class="page-btn ${current === total ? 'active' : ''}" onclick="goToPage(${total})">${total}</button>`);
+  }
+
+  return pages.join('');
+}
+
+function goToPage(page) {
+  const totalPages = Math.ceil(allFaktur.length / rowsPerPage);
+  currentPage = Math.max(1, Math.min(page, totalPages));
+  renderTable();
+  // Scroll table into view
+  document.getElementById('tableContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function changeRowsPerPage(val) {
+  const firstVisibleIdx = (currentPage - 1) * rowsPerPage;
+  rowsPerPage = parseInt(val);
+  // Keep approximately the same position
+  currentPage = Math.floor(firstVisibleIdx / rowsPerPage) + 1;
+  renderTable();
 }
 
 function deleteFaktur(idx) {
   const name = allFaktur[idx].noFaktur || allFaktur[idx].fileName;
   allFaktur.splice(idx, 1);
+  // If current page is now beyond total pages, go back
+  const totalPages = Math.max(1, Math.ceil(allFaktur.length / rowsPerPage));
+  if (currentPage > totalPages) currentPage = totalPages;
   renderTable();
   updateStats();
   showToast(`Faktur ${name} dihapus`);
@@ -3381,6 +3575,7 @@ function deleteFaktur(idx) {
 function clearAll() {
   if (!confirm('Hapus semua data?')) return;
   allFaktur = [];
+  currentPage = 1;
   renderTable();
   updateStats();
   showToast('Semua data dihapus');
