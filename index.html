@@ -413,6 +413,7 @@ h1 {
 /* Minimize/Maximize */
 .table-outer.minimized #tableContainer { display: none; }
 
+/* Maximized: popup fullscreen */
 .table-outer.maximized {
   position: fixed;
   inset: 0;
@@ -421,34 +422,113 @@ h1 {
   display: flex;
   flex-direction: column;
   padding: 0;
+  animation: tblPopIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.table-outer.maximized.restoring {
+  animation: tblPopOut 0.28s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes tblPopIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.88) translateY(20px);
+    border-radius: 16px;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    border-radius: 0;
+  }
+}
+@keyframes tblPopOut {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    border-radius: 0;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.92) translateY(16px);
+    border-radius: 16px;
+  }
 }
 .table-outer.maximized .tbl-panel-header {
   border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  padding: 16px 24px;
 }
 .table-outer.maximized .table-wrap {
   flex: 1;
   border-radius: 0;
+  border: none;
   display: flex;
   flex-direction: column;
 }
 .table-outer.maximized .table-scroll {
   flex: 1;
   max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
+.table-outer.maximized table {
+  table-layout: fixed;
+  width: 100%;
+}
+.table-outer.maximized thead th,
+.table-outer.maximized tbody td {
+  white-space: normal;
+  word-wrap: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 10px 10px;
+}
+/* Column width distribution for maximized view (12 columns) */
+.table-outer.maximized thead th:nth-child(1),
+.table-outer.maximized tbody td:nth-child(1) { width: 3%; }    /* # */
+.table-outer.maximized thead th:nth-child(2),
+.table-outer.maximized tbody td:nth-child(2) { width: 12%; }   /* No. Faktur */
+.table-outer.maximized thead th:nth-child(3),
+.table-outer.maximized tbody td:nth-child(3) { width: 8%; }    /* Tanggal */
+.table-outer.maximized thead th:nth-child(4),
+.table-outer.maximized tbody td:nth-child(4) { width: 14%; }   /* PKP/Penjual */
+.table-outer.maximized thead th:nth-child(5),
+.table-outer.maximized tbody td:nth-child(5) { width: 13%; }   /* Pembeli */
+.table-outer.maximized thead th:nth-child(6),
+.table-outer.maximized tbody td:nth-child(6) { width: 12%; }   /* Barang/Jasa */
+.table-outer.maximized thead th:nth-child(7),
+.table-outer.maximized tbody td:nth-child(7) { width: 5%; }    /* Jenis */
+.table-outer.maximized thead th:nth-child(8),
+.table-outer.maximized tbody td:nth-child(8) { width: 10%; }   /* Harga Jual */
+.table-outer.maximized thead th:nth-child(9),
+.table-outer.maximized tbody td:nth-child(9) { width: 9%; }    /* DPP */
+.table-outer.maximized thead th:nth-child(10),
+.table-outer.maximized tbody td:nth-child(10) { width: 8%; }   /* PPN */
+.table-outer.maximized thead th:nth-child(11),
+.table-outer.maximized tbody td:nth-child(11) { width: 3.5%; } /* Ket */
+.table-outer.maximized thead th:nth-child(12),
+.table-outer.maximized tbody td:nth-child(12) { width: 2.5%; } /* Delete */
 .table-outer.maximized .pagination-wrap {
   border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
 }
-/* Allow fixed children to escape overflow:hidden parent */
-.results-section:has(.table-outer.maximized) {
-  overflow: visible;
+/* Placeholder keeps layout stable when table is moved to body */
+.table-outer-placeholder {
+  display: none;
 }
 .tbl-overlay {
-  display: none;
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.6);
   z-index: 999;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
-.tbl-overlay.show { display: block; }
+.tbl-overlay.show { opacity: 1; visibility: visible; }
 
 .tbl-panel-header {
   background: var(--surface);
@@ -3117,6 +3197,7 @@ function parseFakturCoretax(text, fileName) {
     hargaJual: 0,
     potongan: 0,
     dpp: 0,
+    dppNilaiLain: 0,
     ppn: 0,
     ppnbm: 0,
     // Items
@@ -3212,9 +3293,24 @@ function parseFakturCoretax(text, fileName) {
   let dppMatch = text.match(/Dasar Pengenaan Pajak\s+([\d\.,]+)/i);
   if (dppMatch) result.dpp = parseNum(dppMatch[1]);
 
-  // PPN - handle both Coretax "Jumlah PPN" and old "Total PPN"
+  // DPP Nilai Lain = 11/12 x DPP (PMK-131/2024)
+  // Try parsing from PDF first, then calculate
+  let dppNLMatch = text.match(/DPP Nilai Lain\s+([\d\.,]+)/i);
+  if (dppNLMatch) {
+    result.dppNilaiLain = parseNum(dppNLMatch[1]);
+  } else if (result.dpp > 0) {
+    result.dppNilaiLain = Math.round(result.dpp * 11 / 12);
+  }
+
+  // PPN - parse from PDF first, then recalculate from formula for consistency
+  // Formula: PPN = 12% x DPP Nilai Lain
   let ppnMatch = text.match(/(?:Jumlah|Total)\s+PPN\s*(?:\(Pajak Pertambahan Nilai\))?\s+([\d\.,]+)/i);
   if (ppnMatch) result.ppn = parseNum(ppnMatch[1]);
+  // Recalculate PPN from formula to ensure consistency (skip if PPN Dibebaskan)
+  const isPPNNol = /PPN DIBEBASKAN|PPN TIDAK DIPUNGUT/i.test(text) || /^0[2378]0\./i.test(result.noFaktur || '');
+  if (result.dppNilaiLain > 0 && !isPPNNol) {
+    result.ppn = Math.round(result.dppNilaiLain * 12 / 100);
+  }
 
   let ppnbmMatch = text.match(/(?:Jumlah|Total)\s+PPnBM\s*(?:\(Pajak Penjualan (?:atas )?Barang Mewah\))?\s+([\d\.,]+)/i);
   if (ppnbmMatch) result.ppnbm = parseNum(ppnbmMatch[1]);
@@ -3239,6 +3335,8 @@ function parseFakturCoretax(text, fileName) {
       let unit = '';
       let jumlah = 0;
       let jenis = ''; // Goods or Services
+      let itemPotongan = 0;
+      let itemPPnBM = 0;
       
       // Read subsequent lines for this item
       for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
@@ -3268,6 +3366,20 @@ function parseFakturCoretax(text, fileName) {
           harga = parseNum(pqMatch[1]);
           qty = parseNum(pqMatch[2]);
           unit = pqMatch[3] || '';
+        }
+        
+        // Potongan Harga per item: "Potongan Harga = Rp 202.703,00"
+        let potItemMatch = l.match(/Potongan\s+Harga\s*=\s*Rp\s*([\d\.,]+)/i);
+        if (potItemMatch) {
+          itemPotongan = parseNum(potItemMatch[1]);
+          continue;
+        }
+        
+        // PPnBM per item: "PPnBM (0,00%) = Rp 0,00"
+        let ppnbmItemMatch = l.match(/PPnBM\s*\([^)]*\)\s*=\s*Rp\s*([\d\.,]+)/i);
+        if (ppnbmItemMatch) {
+          itemPPnBM = parseNum(ppnbmItemMatch[1]);
+          continue;
         }
         
         // Jumlah at end of line (right-aligned value)
@@ -3384,7 +3496,12 @@ function parseFakturCoretax(text, fileName) {
         }
       }
 
-      itemBlocks.push({ no: itemNo, kodeBarang, namaBarang, harga, qty, unit, jumlah, jenis });
+      // Calculate per-item DPP, DPP Nilai Lain, PPN
+      let itemDPP = jumlah - itemPotongan;
+      let itemDPPNilaiLain = Math.round(itemDPP * 11 / 12);
+      let itemPPN = isPPNNol ? 0 : Math.round(itemDPPNilaiLain * 12 / 100);
+
+      itemBlocks.push({ no: itemNo, kodeBarang, namaBarang, harga, qty, unit, jumlah, jenis, itemPotongan, itemDPP, itemDPPNilaiLain, itemPPN, itemPPnBM });
     }
   }
 
@@ -3413,7 +3530,7 @@ function parseFakturCoretax(text, fileName) {
           if (pqM) { harga = parseNum(pqM[1]); qty = parseNum(pqM[2]); }
         }
         
-        itemBlocks.push({ no, kodeBarang: '', namaBarang, harga, qty, unit: '', jumlah });
+        itemBlocks.push({ no, kodeBarang: '', namaBarang, harga, qty, unit: '', jumlah, itemPotongan: 0, itemDPP: 0, itemDPPNilaiLain: 0, itemPPN: 0, itemPPnBM: 0 });
       }
     }
   }
@@ -3433,12 +3550,38 @@ function parseFakturCoretax(text, fileName) {
         harga: parseNum(m[4]),
         qty: parseNum(m[5]),
         unit: m[6] || '',
-        jumlah: Math.round(parseNum(m[4]) * parseNum(m[5]))
+        jumlah: Math.round(parseNum(m[4]) * parseNum(m[5])),
+        itemPotongan: 0, itemDPP: 0, itemDPPNilaiLain: 0, itemPPN: 0, itemPPnBM: 0
       });
     }
   }
 
   result.items = itemBlocks;
+
+  // Calculate per-item values using formula: DPP = Harga Jual - Potongan, DPP Nilai Lain = 11/12 x DPP, PPN = 12% x DPP Nilai Lain
+  const totalItemJumlah = itemBlocks.reduce((s, it) => s + (it.jumlah || 0), 0);
+  const hasItemPotongan = itemBlocks.some(it => it.itemPotongan > 0);
+
+  itemBlocks.forEach(it => {
+    // If no per-item potongan parsed, distribute proportionally from faktur total
+    if (!hasItemPotongan && result.potongan > 0 && totalItemJumlah > 0) {
+      const ratio = it.jumlah / totalItemJumlah;
+      it.itemPotongan = Math.round(result.potongan * ratio);
+    }
+    // DPP = Harga Jual - Potongan
+    if (!it.itemDPP || it.itemDPP === 0) {
+      it.itemDPP = (it.jumlah || 0) - (it.itemPotongan || 0);
+    }
+    // DPP Nilai Lain = 11/12 x DPP
+    it.itemDPPNilaiLain = Math.round(it.itemDPP * 11 / 12);
+    // PPN = 12% x DPP Nilai Lain (0 for kode 020, 030, 070, 080)
+    it.itemPPN = isPPNNol ? 0 : Math.round(it.itemDPPNilaiLain * 12 / 100);
+    // Fallback PPnBM: distribute if not parsed per item
+    if (!it.itemPPnBM && result.ppnbm > 0 && totalItemJumlah > 0) {
+      const ratio = it.jumlah / totalItemJumlah;
+      it.itemPPnBM = Math.round(result.ppnbm * ratio);
+    }
+  });
 
   // Determine overall jenis transaksi
   const hasServices = itemBlocks.some(it => it.jenis === 'Services');
@@ -3450,7 +3593,12 @@ function parseFakturCoretax(text, fileName) {
     result.items.push({
       no: 1, kodeBarang: '', namaBarang: '(tidak terbaca)', 
       harga: result.hargaJual || result.dpp, qty: 1, unit: '', 
-      jumlah: result.hargaJual || result.dpp
+      jumlah: result.hargaJual || result.dpp,
+      itemPotongan: result.potongan || 0,
+      itemDPP: result.dpp,
+      itemDPPNilaiLain: result.dppNilaiLain || Math.round(result.dpp * 11 / 12),
+      itemPPN: isPPNNol ? 0 : (result.ppn || Math.round(Math.round(result.dpp * 11 / 12) * 12 / 100)),
+      itemPPnBM: result.ppnbm || 0
     });
   }
 
@@ -3466,12 +3614,20 @@ function parseFakturCoretax(text, fileName) {
   let refMatch = text.match(/\(Referensi:\s*(.+?)\)/i);
   if (refMatch) result.referensi = refMatch[1].trim();
 
-  // Keterangan
+  // Keterangan berdasarkan kode transaksi
   if (/PPN DIBEBASKAN/i.test(text)) {
     let ppMatch = text.match(/PP\s*(?:NOMOR\s*)?(\d+\s*TAHUN\s*\d+)/i);
     result.keterangan = 'PPN Dibebaskan' + (ppMatch ? ' PP ' + ppMatch[1] : '');
-  } else if (/080\./i.test(result.noFaktur)) {
+  } else if (/PPN TIDAK DIPUNGUT/i.test(text)) {
+    result.keterangan = 'PPN Tidak Dipungut';
+  } else if (/^080\./.test(result.noFaktur)) {
     result.keterangan = 'PPN Dibebaskan';
+  } else if (/^070\./.test(result.noFaktur)) {
+    result.keterangan = 'PPN Tidak Dipungut';
+  } else if (/^020\./.test(result.noFaktur)) {
+    result.keterangan = 'Pemungut Bendaharawan';
+  } else if (/^030\./.test(result.noFaktur)) {
+    result.keterangan = 'Pemungut Selain Bendaharawan';
   }
 
   // Validate
@@ -3680,7 +3836,6 @@ function toggleTableMaximize() {
   var icoMax = document.getElementById('icoTblMax');
   var icoRes = document.getElementById('icoTblRes');
   var container = document.getElementById('tableContainer');
-  var resultsSection = document.getElementById('resultsSection');
   if (!outer) return;
 
   // Restore from minimize first if needed
@@ -3691,19 +3846,48 @@ function toggleTableMaximize() {
     if (btnMin) btnMin.innerHTML = '<svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
   }
 
-  var isMax = outer.classList.toggle('maximized');
-  if (overlay) overlay.classList.toggle('show', isMax);
-  // Fix overflow:hidden on parent to allow fixed positioning
-  if (resultsSection) resultsSection.style.overflow = isMax ? 'visible' : '';
+  var isCurrentlyMax = outer.classList.contains('maximized');
 
-  if (isMax) {
+  if (!isCurrentlyMax) {
+    // === MAXIMIZE: move to body to escape overflow:hidden ===
+    // Create placeholder to remember where to put it back
+    var placeholder = document.createElement('div');
+    placeholder.id = 'tableOuterPlaceholder';
+    placeholder.className = 'table-outer-placeholder';
+    outer.parentNode.insertBefore(placeholder, outer);
+
+    // Move overlay and outer to body
+    document.body.appendChild(overlay);
+    document.body.appendChild(outer);
+
+    // Apply maximized
+    outer.classList.add('maximized');
+    overlay.classList.add('show');
+    document.body.style.overflow = 'hidden';
+
     if (icoMax) icoMax.style.display = 'none';
     if (icoRes) icoRes.style.display = 'block';
-    document.body.style.overflow = 'hidden';
   } else {
-    if (icoMax) icoMax.style.display = 'block';
-    if (icoRes) icoRes.style.display = 'none';
-    document.body.style.overflow = '';
+    // === RESTORE: animate out, then move back ===
+    outer.classList.add('restoring');
+    overlay.classList.remove('show');
+
+    outer.addEventListener('animationend', function handler() {
+      outer.removeEventListener('animationend', handler);
+      outer.classList.remove('maximized', 'restoring');
+      document.body.style.overflow = '';
+
+      if (icoMax) icoMax.style.display = 'block';
+      if (icoRes) icoRes.style.display = 'none';
+
+      // Move back to original position
+      var placeholder = document.getElementById('tableOuterPlaceholder');
+      if (placeholder) {
+        placeholder.parentNode.insertBefore(overlay, placeholder);
+        placeholder.parentNode.insertBefore(outer, placeholder);
+        placeholder.remove();
+      }
+    }, { once: true });
   }
 }
 
@@ -3751,11 +3935,18 @@ function clearAll() {
   var outer = document.getElementById('tableOuter');
   var overlay = document.getElementById('tblOverlay');
   var container = document.getElementById('tableContainer');
-  var resultsSection = document.getElementById('resultsSection');
-  if (outer) { outer.classList.remove('minimized', 'maximized'); }
+
+  // If maximized, move elements back to original position first
+  var placeholder = document.getElementById('tableOuterPlaceholder');
+  if (placeholder && outer && overlay) {
+    placeholder.parentNode.insertBefore(overlay, placeholder);
+    placeholder.parentNode.insertBefore(outer, placeholder);
+    placeholder.remove();
+  }
+
+  if (outer) { outer.classList.remove('minimized', 'maximized', 'restoring'); }
   if (overlay) { overlay.classList.remove('show'); }
   if (container) { container.style.display = ''; }
-  if (resultsSection) { resultsSection.style.overflow = ''; }
   document.body.style.overflow = '';
   var icoMax = document.getElementById('icoTblMax');
   var icoRes = document.getElementById('icoTblRes');
@@ -3778,10 +3969,16 @@ function exportExcel() {
     ['REKAP FAKTUR PAJAK'],
     ['Tanggal Export: ' + new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })],
     [],
-    ['No', 'No. Faktur Pajak', 'Tanggal', 'PKP / Penjual', 'NPWP PKP', 'Pembeli', 'NPWP Pembeli', 'Harga Jual (Rp)', 'Potongan (Rp)', 'DPP (Rp)', 'PPN (Rp)', 'PPnBM (Rp)', 'Keterangan', 'Referensi', 'Penandatangan']
+    ['No', 'No. Faktur Pajak', 'Tanggal', 'PKP / Penjual', 'NPWP PKP', 'Pembeli', 'NPWP Pembeli', 'Harga Jual (Rp)', 'Potongan (Rp)', 'DPP (Rp)', 'DPP Nilai Lain (Rp)', 'PPN (Rp)', 'PPnBM (Rp)', 'Keterangan', 'Referensi', 'Penandatangan']
   ];
 
   allFaktur.forEach((f, i) => {
+    const row = i + 5; // data starts at row 5 (1-indexed in Excel)
+    const isPPNNolFaktur = /^0[2378]0\./.test(f.noFaktur || '');
+    // Calculate from same JS logic used in Detail Items
+    const fakturDPP = f.hargaJual - f.potongan;
+    const fakturDPPNL = Math.round(fakturDPP * 11 / 12);
+    const fakturPPN = isPPNNolFaktur ? 0 : Math.round(fakturDPPNL * 12 / 100);
     rekapData.push([
       i + 1,
       f.noFaktur,
@@ -3792,8 +3989,9 @@ function exportExcel() {
       f.npwpPembeli,
       f.hargaJual,
       f.potongan,
-      f.dpp,
-      f.ppn,
+      { t: 'n', f: `H${row}-I${row}` },                // DPP = Harga Jual - Potongan (formula OK, no rounding issue)
+      fakturDPPNL,                                       // DPP Nilai Lain = hardcoded
+      fakturPPN,                                         // PPN = hardcoded
       f.ppnbm,
       f.keterangan,
       f.referensi,
@@ -3810,6 +4008,7 @@ function exportExcel() {
     { t: 'n', f: `SUM(J5:J${lastRow})` },
     { t: 'n', f: `SUM(K5:K${lastRow})` },
     { t: 'n', f: `SUM(L5:L${lastRow})` },
+    { t: 'n', f: `SUM(M5:M${lastRow})` },
     '', '', ''
   ]);
 
@@ -3818,13 +4017,13 @@ function exportExcel() {
   // Column widths
   wsRekap['!cols'] = [
     {wch:5}, {wch:25}, {wch:20}, {wch:30}, {wch:20}, {wch:30}, {wch:20},
-    {wch:18}, {wch:15}, {wch:18}, {wch:15}, {wch:15}, {wch:25}, {wch:25}, {wch:20}
+    {wch:18}, {wch:15}, {wch:18}, {wch:18}, {wch:15}, {wch:15}, {wch:25}, {wch:25}, {wch:20}
   ];
 
   // Number format for currency columns
   const numFmt = '#,##0';
   for (let r = 4; r <= lastRow; r++) {
-    ['H','I','J','K','L'].forEach(c => {
+    ['H','I','J','K','L','M'].forEach(c => {
       const ref = c + (r + 1);
       if (wsRekap[ref]) wsRekap[ref].z = numFmt;
     });
@@ -3836,13 +4035,43 @@ function exportExcel() {
   const detailData = [
     ['DETAIL ITEMS FAKTUR PAJAK'],
     [],
-    ['No', 'No. Faktur', 'Tanggal', 'Item', 'Kode Barang', 'Tipe', 'Nama Barang / Jasa', 'Harga Satuan (Rp)', 'Kuantitas', 'Satuan', 'Jumlah (Rp)']
+    ['No', 'No. Faktur', 'Tanggal', 'Item', 'Kode Barang', 'Tipe', 'Nama Barang / Jasa', 'Harga Satuan (Rp)', 'Kuantitas', 'Satuan', 'Harga Jual (Rp)', 'Potongan (Rp)', 'DPP (Rp)', 'DPP Nilai Lain (Rp)', 'PPN (Rp)', 'PPnBM (Rp)']
   ];
 
   let itemNo = 0;
+  let detailRowNum = 3; // header is row 3, data starts at row 4
   allFaktur.forEach(f => {
-    f.items.forEach(item => {
+    const isPPNNolFaktur = /^0[2378]0\./.test(f.noFaktur || '');
+    // Calculate faktur-level targets (same as Rekap)
+    const fakturDPP = f.hargaJual - f.potongan;
+    const fakturDPPNL = Math.round(fakturDPP * 11 / 12);
+    const fakturPPN = isPPNNolFaktur ? 0 : Math.round(fakturDPPNL * 12 / 100);
+
+    // Pre-calculate per item, then adjust last item for remainder
+    const itemCalcs = f.items.map(item => {
+      const dpp = (item.jumlah || 0) - (item.itemPotongan || 0);
+      const dppNL = Math.round(dpp * 11 / 12);
+      const ppn = isPPNNolFaktur ? 0 : Math.round(dppNL * 12 / 100);
+      return { dpp, dppNL, ppn };
+    });
+
+    // Adjust last item so SUM matches faktur-level exactly
+    if (itemCalcs.length > 1) {
+      const sumDPPNL = itemCalcs.slice(0, -1).reduce((s, c) => s + c.dppNL, 0);
+      const sumPPN = itemCalcs.slice(0, -1).reduce((s, c) => s + c.ppn, 0);
+      itemCalcs[itemCalcs.length - 1].dppNL = fakturDPPNL - sumDPPNL;
+      itemCalcs[itemCalcs.length - 1].ppn = fakturPPN - sumPPN;
+    } else if (itemCalcs.length === 1) {
+      // Single item: use exact faktur values
+      itemCalcs[0].dppNL = fakturDPPNL;
+      itemCalcs[0].ppn = fakturPPN;
+    }
+
+    f.items.forEach((item, idx) => {
       itemNo++;
+      detailRowNum++;
+      const r = detailRowNum;
+      const calc = itemCalcs[idx];
       detailData.push([
         itemNo,
         f.noFaktur,
@@ -3854,7 +4083,12 @@ function exportExcel() {
         item.harga,
         item.qty,
         item.unit,
-        item.jumlah
+        item.jumlah,
+        item.itemPotongan || 0,
+        { t: 'n', f: `K${r}-L${r}` },    // DPP = Harga Jual - Potongan (formula, no rounding issue)
+        calc.dppNL,                        // DPP Nilai Lain = hardcoded (remainder-adjusted)
+        calc.ppn,                          // PPN = hardcoded (remainder-adjusted)
+        item.itemPPnBM || 0
       ]);
     });
   });
@@ -3862,16 +4096,21 @@ function exportExcel() {
   const detailLastRow = detailData.length;
   detailData.push([
     '', 'TOTAL', '', '', '', '', '', '', '', '',
-    { t: 'n', f: `SUM(K4:K${detailLastRow})` }
+    { t: 'n', f: `SUM(K4:K${detailLastRow})` },
+    { t: 'n', f: `SUM(L4:L${detailLastRow})` },
+    { t: 'n', f: `SUM(M4:M${detailLastRow})` },
+    { t: 'n', f: `SUM(N4:N${detailLastRow})` },
+    { t: 'n', f: `SUM(O4:O${detailLastRow})` },
+    { t: 'n', f: `SUM(P4:P${detailLastRow})` }
   ]);
 
   const wsDetail = XLSX.utils.aoa_to_sheet(detailData);
   wsDetail['!cols'] = [
-    {wch:5}, {wch:25}, {wch:20}, {wch:6}, {wch:12}, {wch:10}, {wch:40}, {wch:18}, {wch:12}, {wch:10}, {wch:18}
+    {wch:5}, {wch:25}, {wch:20}, {wch:6}, {wch:12}, {wch:10}, {wch:40}, {wch:18}, {wch:12}, {wch:10}, {wch:18}, {wch:16}, {wch:18}, {wch:18}, {wch:16}, {wch:16}
   ];
 
   for (let r = 3; r <= detailLastRow; r++) {
-    ['H','K'].forEach(c => {
+    ['H','K','L','M','N','O','P'].forEach(c => {
       const ref = c + (r + 1);
       if (wsDetail[ref]) wsDetail[ref].z = numFmt;
     });
