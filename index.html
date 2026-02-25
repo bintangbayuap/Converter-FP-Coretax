@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Converter FP Coretax → Excel</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
@@ -407,6 +407,92 @@ h1 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+/* Minimize/Maximize */
+.table-outer.minimized #tableContainer { display: none; }
+
+.table-outer.maximized {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+.table-outer.maximized .tbl-panel-header {
+  border-radius: 0;
+}
+.table-outer.maximized .table-wrap {
+  flex: 1;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+.table-outer.maximized .table-scroll {
+  flex: 1;
+  max-height: none;
+}
+.table-outer.maximized .pagination-wrap {
+  border-radius: 0;
+}
+/* Allow fixed children to escape overflow:hidden parent */
+.results-section:has(.table-outer.maximized) {
+  overflow: visible;
+}
+.tbl-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 999;
+}
+.tbl-overlay.show { display: block; }
+
+.tbl-panel-header {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.tbl-panel-header h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  flex: 1;
+}
+.tbl-panel-header .tbl-count {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.tbl-controls {
+  display: flex; align-items: center; gap: 6px;
+}
+.tbl-ctrl-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+}
+.tbl-ctrl-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+.tbl-ctrl-btn svg {
+  width: 14px; height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .table-scroll {
@@ -744,7 +830,7 @@ footer {
 .results-section.results-visible .action-bar {
   animation: slideIn 0.45s 0.06s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-.results-section.results-visible #tableContainer {
+.results-section.results-visible .table-outer {
   animation: slideIn 0.45s 0.12s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .results-section.results-visible .log-panel {
@@ -835,7 +921,23 @@ footer {
       <button class="btn btn-danger" onclick="clearAll()">🗑️ Hapus Semua</button>
     </div>
 
-    <div id="tableContainer"></div>
+    <div class="tbl-overlay" id="tblOverlay" onclick="toggleTableMaximize()"></div>
+    <div class="table-outer" id="tableOuter">
+      <div class="tbl-panel-header" id="tblPanelHeader" style="display:none">
+        <h3>Daftar Faktur Pajak</h3>
+        <span class="tbl-count" id="tblCount"></span>
+        <div class="tbl-controls">
+          <button class="tbl-ctrl-btn" id="btnTblMin" onclick="toggleTableMinimize()" title="Minimize">
+            <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <button class="tbl-ctrl-btn" id="btnTblMax" onclick="toggleTableMaximize()" title="Fullscreen">
+            <svg id="icoTblMax" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            <svg id="icoTblRes" viewBox="0 0 24 24" style="display:none"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="tableContainer"></div>
+    </div>
 
     <div class="log-panel" id="logPanel">
       <div class="log-header" onclick="toggleLog()">
@@ -3416,9 +3518,17 @@ function updateStats() {
 }
 
 function renderTable() {
+  var panelHeader = document.getElementById('tblPanelHeader');
   if (allFaktur.length === 0) {
     document.getElementById('tableContainer').innerHTML = '<div class="empty-state"><p>Belum ada data.</p></div>';
+    if (panelHeader) panelHeader.style.display = 'none';
     return;
+  }
+
+  if (panelHeader) {
+    panelHeader.style.display = 'flex';
+    var tblCount = document.getElementById('tblCount');
+    if (tblCount) tblCount.textContent = allFaktur.length + ' faktur';
   }
 
   const totalPages = Math.ceil(allFaktur.length / rowsPerPage);
@@ -3429,7 +3539,7 @@ function renderTable() {
   const endIdx = Math.min(startIdx + rowsPerPage, allFaktur.length);
   const pageData = allFaktur.slice(startIdx, endIdx);
 
-  let html = `<div class="table-wrap" style="border-radius:var(--radius) var(--radius) 0 0"><div class="table-scroll"><table>
+  let html = `<div class="table-wrap" style="border-radius:0"><div class="table-scroll"><table>
     <thead><tr>
       <th>#</th>
       <th>No. Faktur</th>
@@ -3545,6 +3655,67 @@ function buildPageButtons(current, total) {
   return pages.join('');
 }
 
+function toggleTableMinimize() {
+  var outer = document.getElementById('tableOuter');
+  var btn = document.getElementById('btnTblMin');
+  var container = document.getElementById('tableContainer');
+  if (!outer || !container) return;
+  if (outer.classList.contains('maximized')) return;
+
+  var isMinimized = outer.classList.toggle('minimized');
+  container.style.display = isMinimized ? 'none' : '';
+
+  if (isMinimized) {
+    btn.innerHTML = '<svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    btn.title = 'Expand';
+  } else {
+    btn.innerHTML = '<svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    btn.title = 'Minimize';
+  }
+}
+
+function toggleTableMaximize() {
+  var outer = document.getElementById('tableOuter');
+  var overlay = document.getElementById('tblOverlay');
+  var icoMax = document.getElementById('icoTblMax');
+  var icoRes = document.getElementById('icoTblRes');
+  var container = document.getElementById('tableContainer');
+  var resultsSection = document.getElementById('resultsSection');
+  if (!outer) return;
+
+  // Restore from minimize first if needed
+  if (outer.classList.contains('minimized')) {
+    outer.classList.remove('minimized');
+    if (container) container.style.display = '';
+    var btnMin = document.getElementById('btnTblMin');
+    if (btnMin) btnMin.innerHTML = '<svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+  }
+
+  var isMax = outer.classList.toggle('maximized');
+  if (overlay) overlay.classList.toggle('show', isMax);
+  // Fix overflow:hidden on parent to allow fixed positioning
+  if (resultsSection) resultsSection.style.overflow = isMax ? 'visible' : '';
+
+  if (isMax) {
+    if (icoMax) icoMax.style.display = 'none';
+    if (icoRes) icoRes.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+  } else {
+    if (icoMax) icoMax.style.display = 'block';
+    if (icoRes) icoRes.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    var outer = document.getElementById('tableOuter');
+    if (outer && outer.classList.contains('maximized')) {
+      toggleTableMaximize();
+    }
+  }
+});
+
 function goToPage(page) {
   const totalPages = Math.ceil(allFaktur.length / rowsPerPage);
   currentPage = Math.max(1, Math.min(page, totalPages));
@@ -3576,6 +3747,22 @@ function clearAll() {
   if (!confirm('Hapus semua data?')) return;
   allFaktur = [];
   currentPage = 1;
+  // Reset minimize/maximize state
+  var outer = document.getElementById('tableOuter');
+  var overlay = document.getElementById('tblOverlay');
+  var container = document.getElementById('tableContainer');
+  var resultsSection = document.getElementById('resultsSection');
+  if (outer) { outer.classList.remove('minimized', 'maximized'); }
+  if (overlay) { overlay.classList.remove('show'); }
+  if (container) { container.style.display = ''; }
+  if (resultsSection) { resultsSection.style.overflow = ''; }
+  document.body.style.overflow = '';
+  var icoMax = document.getElementById('icoTblMax');
+  var icoRes = document.getElementById('icoTblRes');
+  if (icoMax) icoMax.style.display = 'block';
+  if (icoRes) icoRes.style.display = 'none';
+  var btnMin = document.getElementById('btnTblMin');
+  if (btnMin) btnMin.innerHTML = '<svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
   renderTable();
   updateStats();
   showToast('Semua data dihapus');
