@@ -3105,22 +3105,25 @@ function isCodeAmbiguous(code) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// findPPNSubset: Cari subset item yang theoretical DPP NL-nya = target
+// findPPNSubset: Cari subset item yang theoretical PPN-nya = target PPN
 // Return: boolean[] — hasPPN[i] = true jika item i kena PPN
+// PENTING: Deteksi pakai PPN (bukan DPP NL) karena:
+//   - PPN selalu 0 untuk item tanpa PPN → sinyal bersih
+//   - "Dasar Pengenaan Pajak" di PDF kode 04 adalah nilai HYBRID, bukan DPP NL murni
 // Strategi:
 //   n ≤ 25  → Bitmask brute-force O(2^n)
 //   n ≤ 45  → Meet-in-the-middle O(2^(n/2) · log)
 //   n > 45  → Greedy + verify
 // ════════════════════════════════════════════════════════════════════════
-function findPPNSubset(theorDPPNLs, target) {
-  const n = theorDPPNLs.length;
+function findPPNSubset(theorValues, target) {
+  const n = theorValues.length;
   if (n === 0) return [];
 
   // Semua 0 → semua tidak kena
   if (target === 0) return new Array(n).fill(false);
 
   // SUM theoretical = target (±rounding) → semua kena
-  const sumAll = theorDPPNLs.reduce((s, v) => s + v, 0);
+  const sumAll = theorValues.reduce((s, v) => s + v, 0);
   if (Math.abs(sumAll - target) <= n) return new Array(n).fill(true);
 
   // ── Strategi 1: Bitmask brute-force (n ≤ 25) ──
@@ -3131,7 +3134,7 @@ function findPPNSubset(theorDPPNLs, target) {
     for (let mask = 1; mask < total; mask++) {
       let sum = 0;
       for (let b = 0; b < n; b++) {
-        if (mask & (1 << b)) sum += theorDPPNLs[b];
+        if (mask & (1 << b)) sum += theorValues[b];
       }
       const diff = Math.abs(sum - target);
       if (diff < bestDiff) {
@@ -3159,7 +3162,7 @@ function findPPNSubset(theorDPPNLs, target) {
     for (let mask = 0; mask < totalA; mask++) {
       let sum = 0;
       for (let b = 0; b < halfA; b++) {
-        if (mask & (1 << b)) sum += theorDPPNLs[b];
+        if (mask & (1 << b)) sum += theorValues[b];
       }
       listA.push({ sum, mask });
     }
@@ -3174,7 +3177,7 @@ function findPPNSubset(theorDPPNLs, target) {
     for (let maskB = 0; maskB < totalB; maskB++) {
       let sumB = 0;
       for (let b = 0; b < halfB; b++) {
-        if (maskB & (1 << b)) sumB += theorDPPNLs[halfA + b];
+        if (maskB & (1 << b)) sumB += theorValues[halfA + b];
       }
       const need = target - sumB;
 
@@ -3211,7 +3214,7 @@ function findPPNSubset(theorDPPNLs, target) {
 
   // ── Strategi 3: Greedy + verify (n > 45) ──
   // Sort item dari besar ke kecil, ambil sampai mendekati target
-  const indexed = theorDPPNLs.map((v, i) => ({ v, i }));
+  const indexed = theorValues.map((v, i) => ({ v, i }));
   indexed.sort((a, b) => b.v - a.v);
   const result = new Array(n).fill(false);
   let remaining = target;
@@ -3360,22 +3363,25 @@ async function processFiles(files) {
         //          Detail Items = distribusi proporsional, TIDAK BOLEH MINUS
         // ══════════════════════════════════════════════════════════════════
 
-        // "Dasar Pengenaan Pajak" di PDF Coretax = DPP Nilai Lain (bukan DPP sesungguhnya)
-        // Gunakan flag _dppParsedFromPDF untuk bedakan "PDF memang 0" vs "regex gagal"
+        // "Dasar Pengenaan Pajak" di PDF Coretax:
+        //   - Kode 01 normal: ≈ DPP Nilai Lain (11/12 × HJ)
+        //   - Kode 04 mixed PPN: HYBRID (non-PPN items full HJ + PPN items 11/12)
+        // Oleh karena itu, PPN dari PDF lebih reliable untuk deteksi subset
         const dppWasParsed = faktur._dppParsedFromPDF;
         const ppnWasParsed = faktur._ppnParsedFromPDF;
-        const parsedDPPNilaiLain = dppWasParsed ? faktur.dpp : null;  // null jika regex gagal
         const parsedPPN = ppnWasParsed ? faktur.ppn : null;
 
         // ── REKAP LEVEL ──
         // DPP = Harga Jual - Potongan (dihitung manual, bukan dari PDF)
         faktur.dpp = faktur.hargaJual - (faktur.potongan || 0);
-        // Kode 020/030/070/080 → DPP Nilai Lain & PPN dipaksa 0
+        // Kode 02/03/07/08 → DPP Nilai Lain & PPN dipaksa 0
         const isPPNNolFaktur = /^0[2378]/.test(faktur.noFaktur || '');
-        faktur.dppNilaiLain = isPPNNolFaktur ? 0 : ((parsedDPPNilaiLain !== null) ? parsedDPPNilaiLain : Math.round(faktur.dpp * 11 / 12));
-        faktur.ppn = isPPNNolFaktur ? 0 : ((parsedPPN !== null) ? parsedPPN : Math.round(faktur.dppNilaiLain * 12 / 100));
+        // PPN paten dari PDF (reliable, unambiguous)
+        faktur.ppn = isPPNNolFaktur ? 0 : ((parsedPPN !== null) ? parsedPPN : Math.round(Math.round(faktur.dpp * 11 / 12) * 12 / 100));
+        // DPP Nilai Lain: initial estimate, akan di-override oleh per-item distribution jika ada items
+        faktur.dppNilaiLain = isPPNNolFaktur ? 0 : Math.round(faktur.dpp * 11 / 12);
 
-        console.log(`[PostParse] ${faktur.noFaktur}: dppFromPDF=${dppWasParsed} ppnFromPDF=${ppnWasParsed} | parsedDPPNL=${parsedDPPNilaiLain} parsedPPN=${parsedPPN} | final DPPNL=${faktur.dppNilaiLain} PPN=${faktur.ppn} isPPNNol=${isPPNNolFaktur}`);
+        console.log(`[PostParse] ${faktur.noFaktur}: dppFromPDF=${dppWasParsed} ppnFromPDF=${ppnWasParsed} | parsedPPN=${parsedPPN} | PPN=${faktur.ppn} isPPNNol=${isPPNNolFaktur}`);
 
         // ── DETAIL ITEMS LEVEL ──
         // Distribusi SEMUA kolom numerik dari total faktur ke per-item
@@ -3409,30 +3415,28 @@ async function processFiles(files) {
           items.forEach(it => { it.itemDPP = (it.jumlah || 0) - (it.itemPotongan || 0); });
 
           // ── 3. DPP Nilai Lain & PPN per-item → Smart distribution via findPPNSubset ──
-          // Hitung theoretical DPP NL per item, lalu cari subset yang kena PPN
+          // DETEKSI PAKAI PPN (bukan DPP NL) karena:
+          //   - PPN dari PDF selalu akurat dan unambiguous
+          //   - "Dasar Pengenaan Pajak" di PDF kode 04 mixed = nilai HYBRID, bukan DPP NL murni
           const theorDPPNLs = items.map(it => Math.round((it.itemDPP || 0) * 11 / 12));
-          const hasPPN = findPPNSubset(theorDPPNLs, faktur.dppNilaiLain);
+          const theorPPNs = items.map(it => Math.round(Math.round((it.itemDPP || 0) * 11 / 12) * 12 / 100));
+          const hasPPN = findPPNSubset(theorPPNs, faktur.ppn);
 
-          // Set DPP Nilai Lain per-item
+          console.log(`[SubsetDetect] ${faktur.noFaktur}: theorPPNs=[${theorPPNs}] target=${faktur.ppn} → hasPPN=[${hasPPN}]`);
+
+          // Set DPP Nilai Lain per-item berdasarkan hasil deteksi
           items.forEach((it, i) => {
             it.itemDPPNilaiLain = hasPPN[i] ? theorDPPNLs[i] : 0;
           });
-          // Remainder adjustment → item terakhir yang kena PPN
-          const sumDPPNL = items.reduce((s, it) => s + it.itemDPPNilaiLain, 0);
-          if (sumDPPNL !== faktur.dppNilaiLain) {
-            let lastP = n - 1;
-            for (let i = n - 1; i >= 0; i--) { if (hasPPN[i]) { lastP = i; break; } }
-            if (items[lastP].itemDPPNilaiLain + (faktur.dppNilaiLain - sumDPPNL) >= 0) {
-              items[lastP].itemDPPNilaiLain += (faktur.dppNilaiLain - sumDPPNL);
-            }
-          }
+
+          // Update faktur.dppNilaiLain = sum per-item (ensures Rekap = Detail consistency)
+          faktur.dppNilaiLain = items.reduce((s, it) => s + it.itemDPPNilaiLain, 0);
 
           // Set PPN per-item (proporsional terhadap DPP NL per-item)
-          const postItemDPPNLs = items.map(it => it.itemDPPNilaiLain || 0);
-          const postTotalDPPNL = postItemDPPNLs.reduce((s, v) => s + v, 0);
+          const postTotalDPPNL = faktur.dppNilaiLain;
           items.forEach((it, i) => {
             it.itemPPN = (hasPPN[i] && postTotalDPPNL > 0)
-              ? Math.max(0, Math.round(faktur.ppn * postItemDPPNLs[i] / postTotalDPPNL))
+              ? Math.max(0, Math.round(faktur.ppn * it.itemDPPNilaiLain / postTotalDPPNL))
               : 0;
           });
           // Remainder adjustment PPN → item terakhir yang kena PPN
@@ -4490,12 +4494,13 @@ function exportExcel() {
     const fakturPPN = f.ppn;
     const fakturPPnBM = f.ppnbm || 0;
 
-    // Hitung DPP per-item dan theoretical DPP Nilai Lain per-item
+    // Hitung DPP per-item dan theoretical values per-item
     const itemDPPs = items.map(it => (it.jumlah || 0) - (it.itemPotongan || 0));
     const theorDPPNLs = itemDPPs.map(dpp => Math.round(dpp * 11 / 12));
 
-    // ── Tentukan item mana yang kena PPN (unlimited items) ──
-    const hasPPN = findPPNSubset(theorDPPNLs, fakturDPPNL);
+    // ── Tentukan item mana yang kena PPN (pakai PPN, bukan DPP NL) ──
+    const theorPPNs = itemDPPs.map(dpp => Math.round(Math.round(dpp * 11 / 12) * 12 / 100));
+    const hasPPN = findPPNSubset(theorPPNs, fakturPPN);
 
     // ── Hitung DPP Nilai Lain per-item ──
     const distrib = items.map((item, i) => ({
@@ -4504,23 +4509,11 @@ function exportExcel() {
       ppnbm: 0,
     }));
 
-    // Remainder adjustment DPP Nilai Lain → item terakhir yang kena PPN
-    if (n > 0) {
-      const sumDPPNL = distrib.reduce((s, d) => s + d.dppNL, 0);
-      const diffDPPNL = fakturDPPNL - sumDPPNL;
-      let lastPPN = n - 1;
-      for (let i = n - 1; i >= 0; i--) { if (hasPPN[i]) { lastPPN = i; break; } }
-      if (distrib[lastPPN].dppNL + diffDPPNL >= 0) {
-        distrib[lastPPN].dppNL += diffDPPNL;
-      }
-    }
-
     // ── Hitung PPN per-item (hanya untuk item kena PPN) ──
-    const itemDPPNLs = distrib.map(d => d.dppNL);
-    const totalItemDPPNL = itemDPPNLs.reduce((s, v) => s + v, 0);
+    const totalDistribDPPNL = distrib.reduce((s, d) => s + d.dppNL, 0);
     distrib.forEach((d, i) => {
-      d.ppn = (hasPPN[i] && totalItemDPPNL > 0)
-        ? Math.max(0, Math.round(fakturPPN * itemDPPNLs[i] / totalItemDPPNL))
+      d.ppn = (hasPPN[i] && totalDistribDPPNL > 0)
+        ? Math.max(0, Math.round(fakturPPN * d.dppNL / totalDistribDPPNL))
         : 0;
     });
     // Remainder adjustment PPN → item terakhir yang kena PPN
