@@ -3089,9 +3089,19 @@ function detectJenisFromCode(code) {
   // If code is all zeros or empty → skip
   if (!code || /^0+$/.test(code.replace(/\D/g,''))) return '';
   const digits = code.replace(/\D/g, '').padStart(6, '0');
-  if (CORETAX_CODES['A' + digits]) return 'Goods';
-  if (CORETAX_CODES['B' + digits]) return 'Services';
+  const isGoods = !!CORETAX_CODES['A' + digits];
+  const isServices = !!CORETAX_CODES['B' + digits];
+  // Jika kode ada di KEDUA database (ambiguous) → skip, biar layer berikutnya tentukan
+  if (isGoods && isServices) return '';
+  if (isGoods) return 'Goods';
+  if (isServices) return 'Services';
   return '';
+}
+
+function isCodeAmbiguous(code) {
+  if (!code || /^0+$/.test(code.replace(/\D/g,''))) return false;
+  const digits = code.replace(/\D/g, '').padStart(6, '0');
+  return !!CORETAX_CODES['A' + digits] && !!CORETAX_CODES['B' + digits];
 }
 
 // Fix PDF.js worker — cegah "fake worker" warning
@@ -3572,6 +3582,65 @@ function parseFakturCoretax(text, fileName) {
 
       // ── LAYER 2: Kode Barang dari CORETAX_CODES (prefix A=Goods, B=Services) ──
       if (!jenis) jenis = detectJenisFromCode(kodeBarang);
+
+      // Cek apakah kode ada di KEDUA database (A dan B) — ambiguous
+      const codeIsAmbiguous = isCodeAmbiguous(kodeBarang);
+
+      // ── Untuk kode AMBIGUOUS: keyword (Layer 4) lebih reliable dari satuan (Layer 3)
+      //    karena satuan "UNIT/PCS/SET" bisa ada di konteks jasa maupun barang
+      //    sedangkan keyword "MANAGEMENT FEE", "JASA", "SEWA" dll lebih pasti
+      if (!jenis && codeIsAmbiguous && namaBarang) {
+        const nm = namaBarang.toUpperCase();
+        // Quick keyword check for ambiguous codes
+        const svcWords = [
+          'JASA','LAYANAN','SERVICE','SERVICES','SEWA','RENTAL','LEASE','LEASING',
+          'CLOUD','HOSTING','DOMAIN','SERVER','COLOCATION','CDN','VPN','INTERNET',
+          'BANDWIDTH','STREAMING','PLATFORM','SAAS','PAAS','IAAS','LISENSI','LICENSE',
+          'SUBSCRIPTION','LANGGANAN','MAINTENANCE','SUPPORT','HELPDESK','MANAGED',
+          'MONITORING','BACKUP','RECOVERY','CONSULTING','KONSULTASI','ADVISORY',
+          'ROAMING','INTERKONEKSI','INTERCONNECT','SIRKIT','CIRCUIT','AKSES',
+          'INSTALASI','INSTALLATION','PEMASANGAN','PENGERJAAN','KONSTRUKSI',
+          'PEMELIHARAAN','PERBAIKAN','RENOVASI','PENGECATAN','CLEANING',
+          'AUDIT','AKUNTING','ACCOUNTING','LEGAL','NOTARIS','KONSULTAN',
+          'PELATIHAN','TRAINING','KURSUS','WORKSHOP','SEMINAR','BIMBINGAN',
+          'FREIGHT','PENGIRIMAN BARANG','EKSPEDISI','FORWARDER','TRUCKING',
+          'ASURANSI','INSURANCE','PREMI',
+          'IKLAN','ADVERTISING','PROMOSI','DESAIN','DESIGN','FOTOGRAFI',
+          'VIDEOGRAFI','PRODUKSI KONTEN',
+          'ADMINISTRASI','BIAYA ADMIN','MANAGEMENT FEE','KOMISI','COMMISSION',
+          'RAWAT','INAP','JALAN','OPERASI','PEMERIKSAAN','PERAWATAN',
+          'FEE','BIAYA','TENAGA KERJA','OUTSOURCING','OUTSOURCE',
+        ];
+        const goodsWords = [
+          'HANDSET','MODEM','ROUTER','DEVICE','HARDWARE','GADGET','LAPTOP',
+          'KOMPUTER','COMPUTER','PRINTER','SCANNER','KAMERA','CAMERA','TV',
+          'TELEVISI','AC','KULKAS','MESIN','SPARE PART','SPAREPART','KOMPONEN',
+          'VOUCHER','PULSA','STARTER PACK','SIM CARD','SIM','KARTU PERDANA',
+          'KARTU','BUNDLING','PAKET DATA','NEW 4G','KPK',
+          'BERAS','GULA','MINYAK','TEPUNG','TERIGU','GARAM','KOPI','TEH',
+          'AIR MINUM','MINUMAN','MAKANAN','SNACK','BISKUIT','MIE','INSTAN',
+          'BAJA','BESI','ALUMINIUM','TEMBAGA','PIPA','KABEL','KAWAT','PLAT',
+          'SEMEN','PASIR','BATU','BATA','KAYU','TRIPLEK','PLYWOOD',
+          'KAIN','BENANG','TEKSTIL','PLASTIK','KERTAS','KARTON',
+          'PUPUK','PESTISIDA','OBAT','VITAMIN','SUPLEMEN','REAGENT',
+          'BAHAN KIMIA','CHEMICAL','SOLVENT','PELUMAS','OLI',
+          'KENDARAAN','MOBIL','MOTOR','BAN','VELG','FILTER','ACCU',
+          'BENSIN','SOLAR','PERTAMAX','PERTALITE','BBM','AVTUR','LPG',
+          'FURNITURE','MEJA','KURSI','LEMARI','RAK',
+          'ATK','ALAT TULIS','BOLPOIN','KERTAS HVS','TINTA',
+          'SERAGAM','BAJU','PAKAIAN','SEPATU','HELM','SARUNG TANGAN',
+        ];
+        if (svcWords.some(w => nm.includes(w))) {
+          jenis = 'Services';
+        } else if (goodsWords.some(w => nm.includes(w))) {
+          jenis = 'Goods';
+        }
+        // Sub-pattern fallback for ambiguous
+        if (!jenis) {
+          if (/\b(JASA|SVC|SERV|LAYAN|SEWA|RENT|MAINT|KONSUL|AUDIT|TRAIN|KURS|FEE)\b/.test(nm)) jenis = 'Services';
+          else if (/\b(TRX NO|TRX\.|VOUCHER|PERDANA|STARTER)\b/.test(nm)) jenis = 'Goods';
+        }
+      }
 
       // ── LAYER 3: Satuan barang/jasa ──
       if (!jenis && unit) {
