@@ -3361,17 +3361,21 @@ async function processFiles(files) {
         // ══════════════════════════════════════════════════════════════════
 
         // "Dasar Pengenaan Pajak" di PDF Coretax = DPP Nilai Lain (bukan DPP sesungguhnya)
-        // Simpan sebelum di-overwrite — pakai !== null agar nilai 0 dari PDF tetap dihormati
-        const parsedDPPNilaiLain = faktur.dpp;  // paten dari PDF (bisa 0, null jika regex tidak match)
-        const parsedPPN = faktur.ppn;            // paten dari PDF (bisa 0, null jika regex tidak match)
+        // Gunakan flag _dppParsedFromPDF untuk bedakan "PDF memang 0" vs "regex gagal"
+        const dppWasParsed = faktur._dppParsedFromPDF;
+        const ppnWasParsed = faktur._ppnParsedFromPDF;
+        const parsedDPPNilaiLain = dppWasParsed ? faktur.dpp : null;  // null jika regex gagal
+        const parsedPPN = ppnWasParsed ? faktur.ppn : null;
 
         // ── REKAP LEVEL ──
         // DPP = Harga Jual - Potongan (dihitung manual, bukan dari PDF)
         faktur.dpp = faktur.hargaJual - (faktur.potongan || 0);
         // Kode 020/030/070/080 → DPP Nilai Lain & PPN dipaksa 0
-        const isPPNNolFaktur = /^0[2378]0\./.test(faktur.noFaktur || '');
+        const isPPNNolFaktur = /^0[2378]/.test(faktur.noFaktur || '');
         faktur.dppNilaiLain = isPPNNolFaktur ? 0 : ((parsedDPPNilaiLain !== null) ? parsedDPPNilaiLain : Math.round(faktur.dpp * 11 / 12));
         faktur.ppn = isPPNNolFaktur ? 0 : ((parsedPPN !== null) ? parsedPPN : Math.round(faktur.dppNilaiLain * 12 / 100));
+
+        console.log(`[PostParse] ${faktur.noFaktur}: dppFromPDF=${dppWasParsed} ppnFromPDF=${ppnWasParsed} | parsedDPPNL=${parsedDPPNilaiLain} parsedPPN=${parsedPPN} | final DPPNL=${faktur.dppNilaiLain} PPN=${faktur.ppn} isPPNNol=${isPPNNolFaktur}`);
 
         // ── DETAIL ITEMS LEVEL ──
         // Distribusi SEMUA kolom numerik dari total faktur ke per-item
@@ -3610,7 +3614,7 @@ function parseFakturCoretax(text, fileName) {
   // Prioritas 3: "PPN" berdiri sendiri (hati-hati, hanya match di area summary)
   if (!ppnMatch) ppnMatch = text.match(/\bPPN[\s:]+(?:Rp\.?\s*)?([\d\.,]+)/i);
   if (ppnMatch) result.ppn = parseNum(ppnMatch[1]);
-  const isPPNNol = /PPN DIBEBASKAN|PPN TIDAK DIPUNGUT/i.test(text) || /^0[2378]0\./i.test(result.noFaktur || '');
+  const isPPNNol = /PPN DIBEBASKAN|PPN TIDAK DIPUNGUT/i.test(text) || /^0[2378]/i.test(result.noFaktur || '');
 
   // ── PPnBM ──
   let ppnbmMatch = text.match(/(?:Jumlah|Total)\s+PPnBM\s*(?:\(Pajak Penjualan (?:atas )?Barang Mewah\))?[\s:]*(?:Rp\.?\s*)?([\d\.,]+)/i);
@@ -3784,16 +3788,22 @@ function parseFakturCoretax(text, fileName) {
       const jenisAfterAmbig = jenis;
 
       // ── LAYER 3: Satuan barang/jasa ──
+      // Referensi: Satuan Ukur Coretax (UM.0001 - UM.0033) + satuan umum lainnya
       if (!jenis && unit) {
         const u = unit.toUpperCase().trim();
-        // Satuan fisik → Goods
-        if (/^(KG|KGS|GR|GRAM|TON|LTR|LITER|ML|PCS|PC|UNIT|BUAH|BH|BOX|DUS|KARTON|CTN|BTL|BOTOL|KALENG|CAN|SAK|BAG|LEMBAR|LBR|SHEET|MTR|METER|M2|M3|CM|MM|LUSIN|DOZEN|DZ|RIM|ROLL|GULUNG|SET|PASANG|PR|EA|EACH|BIJI|TABLET|KAPSUL|AMPUL|VIAL|TUBE|SACHET|PACK|PAK|GROSS|IKAT|BATANG|BTG|KEPING|KPG|HELAI|HLI|BUNGKUS|BKS)$/.test(u)) {
+        // Satuan fisik → Goods (single word)
+        const goodsUnitSingle = /^(KG|KGS|KILOGRAM|GR|GRAM|KARAT|TON|TONS|KL|KILOLITER|LTR|LITER|ML|MILILITER|BARREL|MMBTU|AMPERE|CM3|M2|M3|METER|MTR|INCHES|INCH|INCI|CM|SENTIMETER|MM|YARD|LUSIN|DOZEN|DZ|UNIT|SET|LEMBAR|LBR|SHEET|PIECE|PIECES|PCS|PC|BOKS|BOX|DUS|KARTON|CTN|BUAH|BH|BTL|BOTOL|KALENG|CAN|SAK|BAG|RIM|ROLL|GULUNG|PASANG|PR|EA|EACH|BIJI|TABLET|KAPSUL|AMPUL|VIAL|TUBE|SACHET|PACK|PAK|GROSS|IKAT|BATANG|BTG|KEPING|KPG|HELAI|HLI|BUNGKUS|BKS|GALON|DRUM|JERIGEN|PAIL|KARUNG|KRAT|CRATE|SLOP|RENCENG|BALL|BALE|BAHAN)$/;
+        // Satuan fisik → Goods (multi-word dari Coretax)
+        const goodsUnitMulti = /^(METRIK TON|WET TON|SENTIMETER KUBIK|METER PERSEGI|METER KUBIK)$/;
+        // Satuan abstrak → Services (single word)
+        const svcUnitSingle = /^(JAM|JM|HOUR|HR|HRS|HARI|DAY|DAYS|BULAN|BLN|MONTH|MTH|MINGGU|WEEK|TAHUN|THN|YEAR|YR|MENIT|MINUTE|MIN|ORANG|ORG|PERSON|PRSN|KALI|KLI|TRIP|TRANSAKSI|TRX|PROYEK|PROJECT|PRJK|KEGIATAN|KGT|PEKERJAAN|PKJ|LAYANAN|JASA|SVC|SERVICE|INVOICE|INV|TAGIHAN|KONTRAK|CONTRACT|LISENSI|LICENSE|SESI|SESSION|VISIT|KUNJUNGAN|PAKET|PKT|APLIKASI|APP|AKUN|ACCOUNT|SAMBUNGAN|CONNECTION|TITIK|KANAL|CHANNEL|LAPORAN|PERSEN)$/;
+
+        if (goodsUnitSingle.test(u) || goodsUnitMulti.test(u)) {
           jenis = 'Goods';
-        }
-        // Satuan abstrak → Services
-        else if (/^(JAM|JM|HOUR|HR|HRS|HARI|DAY|DAYS|BULAN|BLN|MONTH|MTH|TAHUN|THN|YEAR|YR|ORANG|ORG|PERSON|PRSN|KALI|KLI|TRIP|TRANSAKSI|TRX|PROYEK|PROJECT|PRJK|KEGIATAN|KGT|PEKERJAAN|PKJ|LAYANAN|JASA|SVC|SERVICE|INVOICE|INV|TAGIHAN|KONTRAK|CONTRACT|LISENSI|LICENSE|SESI|SESSION|VISIT|KUNJUNGAN|PAKET|PKT|APLIKASI|APP|AKUN|ACCOUNT|SAMBUNGAN|CONNECTION|TITIK|KANAL|CHANNEL)$/.test(u)) {
+        } else if (svcUnitSingle.test(u)) {
           jenis = 'Services';
         }
+        // "Lainnya" → tidak bisa ditentukan, skip ke Layer 4
       }
 
       // ── LAYER 4: Keyword dari uraian nama barang/jasa
@@ -3997,24 +4007,41 @@ function parseFakturCoretax(text, fileName) {
   let refMatch = text.match(/\(Referensi:\s*(.+?)\)/i);
   if (refMatch) result.referensi = refMatch[1].trim();
 
-  // Keterangan berdasarkan kode transaksi
+  // Keterangan berdasarkan kode transaksi (Referensi Coretax: Kode 01-10)
+  // Prioritas 1: Deteksi dari teks PDF (lebih spesifik, bisa ada nomor PP)
   if (/PPN DIBEBASKAN/i.test(text)) {
     let ppMatch = text.match(/PP\s*(?:NOMOR\s*)?(\d+\s*TAHUN\s*\d+)/i);
     result.keterangan = 'PPN Dibebaskan' + (ppMatch ? ' PP ' + ppMatch[1] : '');
   } else if (/PPN TIDAK DIPUNGUT/i.test(text)) {
     result.keterangan = 'PPN Tidak Dipungut';
-  } else if (/^080\./.test(result.noFaktur)) {
+  }
+  // Prioritas 2: Deteksi dari 2 digit kode transaksi di nomor faktur
+  else if (/^08/.test(result.noFaktur)) {
     result.keterangan = 'PPN Dibebaskan';
-  } else if (/^070\./.test(result.noFaktur)) {
+  } else if (/^07/.test(result.noFaktur)) {
     result.keterangan = 'PPN Tidak Dipungut';
-  } else if (/^020\./.test(result.noFaktur)) {
+  } else if (/^02/.test(result.noFaktur)) {
     result.keterangan = 'Pemungut Bendaharawan';
-  } else if (/^030\./.test(result.noFaktur)) {
+  } else if (/^03/.test(result.noFaktur)) {
     result.keterangan = 'Pemungut Selain Bendaharawan';
+  } else if (/^04/.test(result.noFaktur)) {
+    result.keterangan = 'DPP Nilai Lain';
+  } else if (/^05/.test(result.noFaktur)) {
+    result.keterangan = 'Besaran Tertentu';
+  } else if (/^06/.test(result.noFaktur)) {
+    result.keterangan = 'Penyerahan kepada Pemegang Paspor LN (16E UU PPN)';
+  } else if (/^09/.test(result.noFaktur)) {
+    result.keterangan = 'Penyerahan Aktiva (16D UU PPN)';
+  } else if (/^10/.test(result.noFaktur)) {
+    result.keterangan = 'Penyerahan Lainnya';
   }
 
   // Validate
   if (!result.noFaktur && result.dpp === null && result.hargaJual === 0) return null;
+  // Simpan status "apakah dari PDF" SEBELUM null→0 conversion
+  // null = regex gagal parse, 0 = PDF memang menunjukkan 0
+  result._dppParsedFromPDF = (result.dpp !== null);
+  result._ppnParsedFromPDF = (result.ppn !== null);
   // Ensure dpp and ppn are numbers (not null) for downstream
   if (result.dpp === null) result.dpp = 0;
   if (result.ppn === null) result.ppn = 0;
