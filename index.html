@@ -3434,34 +3434,53 @@ function parseFakturCoretax(text, fileName) {
   // Parse numeric values
   const parseNum = (s) => {
     if (!s) return 0;
-    return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
+    // Handle various formats: "4.200.000,00", "0,00", "0", "4200000"
+    const cleaned = s.replace(/\./g, '').replace(',', '.');
+    const val = parseFloat(cleaned);
+    return isNaN(val) ? 0 : val;
   };
 
   // DPP, PPN, PPnBM, Harga Jual
+  // ── Harga Jual ──
   let hjMatch = text.match(/Harga Jual\s*\/\s*Penggantian(?:\s*\/\s*Uang Muka\s*\/\s*Termin)?\s+([\d\.,]+)/i);
   // Try the last occurrence for the total
   const hjMatches = [...text.matchAll(/Harga Jual\s*\/\s*Penggantian(?:\s*\/\s*Uang Muka\s*\/\s*Termin)?\s+([\d\.,]+)/gi)];
   if (hjMatches.length > 0) result.hargaJual = parseNum(hjMatches[hjMatches.length - 1][1]);
 
+  // ── Potongan ──
   let potMatch = text.match(/Dikurangi Potongan Harga\s+([\d\.,]+)/i);
   if (potMatch) result.potongan = parseNum(potMatch[1]);
 
-  let dppMatch = text.match(/Dasar Pengenaan Pajak\s+([\d\.,]+)/i);
+  // ── DPP (Dasar Pengenaan Pajak) — di Coretax ini sebenarnya DPP Nilai Lain ──
+  // Coba beberapa variasi format teks PDF
+  let dppMatch = text.match(/Dasar Pengenaan Pajak[\s:]*(?:Rp\.?\s*)?([\d\.,]+)/i);
+  if (!dppMatch) dppMatch = text.match(/Dasar Pengenaan Pajak\s*\n\s*([\d\.,]+)/i);
   if (dppMatch) result.dpp = parseNum(dppMatch[1]);
 
   // DPP Nilai Lain - only parse from PDF text, no calculation here
-  let dppNLMatch = text.match(/DPP Nilai Lain\s+([\d\.,]+)/i);
+  let dppNLMatch = text.match(/DPP Nilai Lain[\s:]*(?:Rp\.?\s*)?([\d\.,]+)/i);
   if (dppNLMatch) {
     result.dppNilaiLain = parseNum(dppNLMatch[1]);
   }
 
-  // PPN - only parse from PDF text, no calculation here
-  let ppnMatch = text.match(/(?:Jumlah|Total)\s+PPN\s*(?:\(Pajak Pertambahan Nilai\))?\s+([\d\.,]+)/i);
+  // ── PPN — fleksibel: dengan atau tanpa "Jumlah"/"Total" di depan ──
+  // Prioritas 1: "Jumlah PPN ..." atau "Total PPN ..."
+  let ppnMatch = text.match(/(?:Jumlah|Total)\s+PPN\s*(?:\(Pajak Pertambahan Nilai\))?[\s:]*(?:Rp\.?\s*)?([\d\.,]+)/i);
+  // Prioritas 2: "PPN (Pajak Pertambahan Nilai) 0,00" tanpa Jumlah/Total
+  if (!ppnMatch) ppnMatch = text.match(/\bPPN\s*\(Pajak Pertambahan Nilai\)[\s:]*(?:Rp\.?\s*)?([\d\.,]+)/i);
+  // Prioritas 3: "PPN" berdiri sendiri (hati-hati, hanya match di area summary)
+  if (!ppnMatch) ppnMatch = text.match(/\bPPN[\s:]+(?:Rp\.?\s*)?([\d\.,]+)/i);
   if (ppnMatch) result.ppn = parseNum(ppnMatch[1]);
   const isPPNNol = /PPN DIBEBASKAN|PPN TIDAK DIPUNGUT/i.test(text) || /^0[2378]0\./i.test(result.noFaktur || '');
 
-  let ppnbmMatch = text.match(/(?:Jumlah|Total)\s+PPnBM\s*(?:\(Pajak Penjualan (?:atas )?Barang Mewah\))?\s+([\d\.,]+)/i);
+  // ── PPnBM ──
+  let ppnbmMatch = text.match(/(?:Jumlah|Total)\s+PPnBM\s*(?:\(Pajak Penjualan (?:atas )?Barang Mewah\))?[\s:]*(?:Rp\.?\s*)?([\d\.,]+)/i);
+  if (!ppnbmMatch) ppnbmMatch = text.match(/\bPPnBM\s*\(Pajak Penjualan[^)]*\)[\s:]*(?:Rp\.?\s*)?([\d\.,]+)/i);
+  if (!ppnbmMatch) ppnbmMatch = text.match(/\bPPnBM[\s:]+(?:Rp\.?\s*)?([\d\.,]+)/i);
   if (ppnbmMatch) result.ppnbm = parseNum(ppnbmMatch[1]);
+
+  // Debug: log parsed values to console for troubleshooting
+  console.log(`[FP Parse] ${result.noFaktur}: HJ=${result.hargaJual}, DPP(raw)=${result.dpp === null ? 'NULL' : result.dpp}, PPN=${result.ppn === null ? 'NULL' : result.ppn}, PPnBM=${result.ppnbm}`);
 
   // Parse line items - Coretax format
   // Look for patterns like: number, kode barang, nama, then price
