@@ -3219,18 +3219,102 @@ async function processFiles(files) {
 
       const faktur = parseFakturCoretax(fullText, file.name);
       if (faktur) {
-        // PDF "Dasar Pengenaan Pajak" is actually DPP Nilai Lain (11/12 x HJ)
-        // Save it before overwriting
-        const parsedDPPNilaiLain = faktur.dpp; // paten dari PDF
-        const parsedPPN = faktur.ppn;           // paten dari PDF
+        // ══════════════════════════════════════════════════════════════════
+        // POST-PARSE: Sinkronisasi nilai faktur-level & per-item
+        // Prinsip: Harga Jual, Potongan, DPP Nilai Lain, PPN = PATEN dari PDF
+        //          DPP = Harga Jual - Potongan (selalu DIHITUNG)
+        //          Detail Items = distribusi proporsional, TIDAK BOLEH MINUS
+        // ══════════════════════════════════════════════════════════════════
 
-        // True DPP = Harga Jual - Potongan (dihitung)
+        // "Dasar Pengenaan Pajak" di PDF Coretax = DPP Nilai Lain (bukan DPP sesungguhnya)
+        // Simpan sebelum di-overwrite — pakai !== null agar nilai 0 dari PDF tetap dihormati
+        const parsedDPPNilaiLain = faktur.dpp;  // paten dari PDF (bisa 0, null jika regex tidak match)
+        const parsedPPN = faktur.ppn;            // paten dari PDF (bisa 0, null jika regex tidak match)
+
+        // ── REKAP LEVEL ──
+        // DPP = Harga Jual - Potongan (dihitung manual, bukan dari PDF)
         faktur.dpp = faktur.hargaJual - (faktur.potongan || 0);
-        // DPP Nilai Lain = paten dari PDF, fallback hitung
-        faktur.dppNilaiLain = parsedDPPNilaiLain || Math.round(faktur.dpp * 11 / 12);
-        // PPN = paten dari PDF, fallback hitung
+        // Kode 020/030/070/080 → DPP Nilai Lain & PPN dipaksa 0
         const isPPNNolFaktur = /^0[2378]0\./.test(faktur.noFaktur || '');
-        faktur.ppn = parsedPPN || (isPPNNolFaktur ? 0 : Math.round(faktur.dppNilaiLain * 12 / 100));
+        faktur.dppNilaiLain = isPPNNolFaktur ? 0 : ((parsedDPPNilaiLain !== null) ? parsedDPPNilaiLain : Math.round(faktur.dpp * 11 / 12));
+        faktur.ppn = isPPNNolFaktur ? 0 : ((parsedPPN !== null) ? parsedPPN : Math.round(faktur.dppNilaiLain * 12 / 100));
+
+        // ── DETAIL ITEMS LEVEL ──
+        // Distribusi SEMUA kolom numerik dari total faktur ke per-item
+        // RULE: SUM per-item WAJIB = total faktur, tidak boleh MINUS
+        if (faktur.items.length > 0) {
+          const items = faktur.items;
+          const n = items.length;
+
+          // Basis distribusi utama: jumlah (Harga Jual) per item dari parsing
+          const itemJumlahs = items.map(it => Math.max(0, it.jumlah || 0));
+          const totalItemJumlah = itemJumlahs.reduce((s, v) => s + v, 0);
+
+          // ── 1. Harga Jual per-item → remainder adjustment ke item terakhir ──
+          if (totalItemJumlah > 0 && totalItemJumlah !== faktur.hargaJual) {
+            items[n - 1].jumlah = Math.max(0, (items[n - 1].jumlah || 0) + (faktur.hargaJual - totalItemJumlah));
+          }
+
+          // ── 2. Potongan per-item → distribusi proporsional + remainder ──
+          const hasItemPotongan = items.some(it => (it.itemPotongan || 0) > 0);
+          if (!hasItemPotongan && (faktur.potongan || 0) > 0 && totalItemJumlah > 0) {
+            items.forEach((it, i) => {
+              it.itemPotongan = Math.max(0, Math.round(faktur.potongan * itemJumlahs[i] / totalItemJumlah));
+            });
+          }
+          const sumPot = items.reduce((s, it) => s + (it.itemPotongan || 0), 0);
+          if (sumPot !== (faktur.potongan || 0)) {
+            items[n - 1].itemPotongan = Math.max(0, (items[n - 1].itemPotongan || 0) + ((faktur.potongan || 0) - sumPot));
+          }
+
+          // ── Recalculate DPP per-item = Harga Jual - Potongan ──
+          items.forEach(it => { it.itemDPP = (it.jumlah || 0) - (it.itemPotongan || 0); });
+
+          // ── 3. DPP Nilai Lain per-item → distribusi proporsional (basis: DPP item) + remainder ──
+          const itemDPPs = items.map(it => Math.max(0, it.itemDPP || 0));
+          const totalItemDPP = itemDPPs.reduce((s, v) => s + v, 0);
+          if (totalItemDPP > 0) {
+            items.forEach((it, i) => {
+              it.itemDPPNilaiLain = Math.max(0, Math.round(faktur.dppNilaiLain * itemDPPs[i] / totalItemDPP));
+            });
+          } else {
+            items.forEach(it => { it.itemDPPNilaiLain = 0; });
+            if (faktur.dppNilaiLain > 0) items[n - 1].itemDPPNilaiLain = faktur.dppNilaiLain;
+          }
+          const sumDPPNL = items.reduce((s, it) => s + it.itemDPPNilaiLain, 0);
+          if (sumDPPNL !== faktur.dppNilaiLain) {
+            items[n - 1].itemDPPNilaiLain = Math.max(0, items[n - 1].itemDPPNilaiLain + (faktur.dppNilaiLain - sumDPPNL));
+          }
+
+          // ── 4. PPN per-item → distribusi proporsional (basis: DPP Nilai Lain item) + remainder ──
+          const itemDPPNLs = items.map(it => Math.max(0, it.itemDPPNilaiLain || 0));
+          const totalItemDPPNL = itemDPPNLs.reduce((s, v) => s + v, 0);
+          if (totalItemDPPNL > 0) {
+            items.forEach((it, i) => {
+              it.itemPPN = Math.max(0, Math.round(faktur.ppn * itemDPPNLs[i] / totalItemDPPNL));
+            });
+          } else {
+            items.forEach(it => { it.itemPPN = 0; });
+            if (faktur.ppn > 0) items[n - 1].itemPPN = faktur.ppn;
+          }
+          const sumPPN = items.reduce((s, it) => s + it.itemPPN, 0);
+          if (sumPPN !== faktur.ppn) {
+            items[n - 1].itemPPN = Math.max(0, items[n - 1].itemPPN + (faktur.ppn - sumPPN));
+          }
+
+          // ── 5. PPnBM per-item → distribusi proporsional + remainder ──
+          const hasItemPPnBM = items.some(it => (it.itemPPnBM || 0) > 0);
+          if (!hasItemPPnBM && (faktur.ppnbm || 0) > 0 && totalItemJumlah > 0) {
+            items.forEach((it, i) => {
+              it.itemPPnBM = Math.max(0, Math.round(faktur.ppnbm * itemJumlahs[i] / totalItemJumlah));
+            });
+          }
+          const sumPPnBM = items.reduce((s, it) => s + (it.itemPPnBM || 0), 0);
+          if (sumPPnBM !== (faktur.ppnbm || 0)) {
+            items[n - 1].itemPPnBM = Math.max(0, (items[n - 1].itemPPnBM || 0) + ((faktur.ppnbm || 0) - sumPPnBM));
+          }
+        }
+
         allFaktur.push(faktur);
         log(`✓ Berhasil: ${faktur.noFaktur} — DPP: ${formatRp(faktur.dpp)}`, 'success');
         successCount++;
@@ -3268,9 +3352,9 @@ function parseFakturCoretax(text, fileName) {
     // Totals
     hargaJual: 0,
     potongan: 0,
-    dpp: 0,
-    dppNilaiLain: 0,
-    ppn: 0,
+    dpp: null,
+    dppNilaiLain: null,
+    ppn: null,
     ppnbm: 0,
     // Items
     items: [],
@@ -3464,14 +3548,13 @@ function parseFakturCoretax(text, fileName) {
         jumlah = parseNum(endValMatch[1]);
       }
 
-      // ── LAYER 1: Kode Barang dari CORETAX_CODES (prefix A=Goods, B=Services)
-      //    Hanya berlaku jika kode bukan nol
+      // ── LAYER 1 (prioritas tertinggi): Label eksplisit GOODS/SERVICES/BKP/JKP dari teks PDF ──
+      //    Sudah ditangkap di loop j di atas — jika ketemu, variabel jenis sudah ter-set
+
+      // ── LAYER 2: Kode Barang dari CORETAX_CODES (prefix A=Goods, B=Services) ──
       if (!jenis) jenis = detectJenisFromCode(kodeBarang);
 
-      // ── LAYER 2: Label eksplisit GOODS/SERVICES/BKP/JKP dari PDF (sudah ditangkap di loop atas)
-      // (variabel jenis sudah di-set di dalam loop j di atas jika label ketemu)
-
-      // ── LAYER 3: Satuan barang/jasa
+      // ── LAYER 3: Satuan barang/jasa ──
       if (!jenis && unit) {
         const u = unit.toUpperCase().trim();
         // Satuan fisik → Goods
@@ -3562,7 +3645,7 @@ function parseFakturCoretax(text, fileName) {
 
       // Calculate per-item DPP, DPP Nilai Lain, PPN
       let itemDPP = jumlah - itemPotongan;
-      let itemDPPNilaiLain = Math.round(itemDPP * 11 / 12);
+      let itemDPPNilaiLain = isPPNNol ? 0 : Math.round(itemDPP * 11 / 12);
       let itemPPN = isPPNNol ? 0 : Math.round(itemDPPNilaiLain * 12 / 100);
 
       itemBlocks.push({ no: itemNo, kodeBarang, namaBarang, harga, qty, unit, jumlah, jenis, itemPotongan, itemDPP, itemDPPNilaiLain, itemPPN, itemPPnBM });
@@ -3636,9 +3719,10 @@ function parseFakturCoretax(text, fileName) {
     if (!it.itemDPP || it.itemDPP === 0) {
       it.itemDPP = (it.jumlah || 0) - (it.itemPotongan || 0);
     }
-    // DPP Nilai Lain = 11/12 x DPP
-    it.itemDPPNilaiLain = Math.round(it.itemDPP * 11 / 12);
-    // PPN = 12% x DPP Nilai Lain (0 for kode 020, 030, 070, 080)
+    // DPP Nilai Lain & PPN: jika dari PDF dppNilaiLain/ppn di-parse (termasuk 0), gunakan apa adanya
+    // Flag _dppNilaiLainFromPDF & _ppnFromPDF di-set oleh caller (post-parse)
+    // Di sini kita hitung default dulu, nanti akan di-adjust oleh caller jika perlu
+    it.itemDPPNilaiLain = isPPNNol ? 0 : Math.round(it.itemDPP * 11 / 12);
     it.itemPPN = isPPNNol ? 0 : Math.round(it.itemDPPNilaiLain * 12 / 100);
     // Fallback PPnBM: distribute if not parsed per item
     if (!it.itemPPnBM && result.ppnbm > 0 && totalItemJumlah > 0) {
@@ -3652,16 +3736,19 @@ function parseFakturCoretax(text, fileName) {
   const hasGoods = itemBlocks.some(it => it.jenis === 'Goods');
   result.jenisTransaksi = (hasServices && hasGoods) ? 'Mixed' : (hasServices ? 'Services' : (hasGoods ? 'Goods' : ''));
 
-  // If we still have no items but have DPP, create a single-item entry
-  if (result.items.length === 0 && result.dpp > 0) {
+  // If we still have no items but have hargaJual, create a single-item entry
+  if (result.items.length === 0 && (result.hargaJual > 0 || result.dpp !== null)) {
+    const dppVal = (result.dpp !== null) ? result.dpp : 0;
+    const dppNLVal = isPPNNol ? 0 : ((result.dppNilaiLain !== null) ? result.dppNilaiLain : Math.round(dppVal * 11 / 12));
+    const ppnVal = isPPNNol ? 0 : ((result.ppn !== null) ? result.ppn : Math.round(dppNLVal * 12 / 100));
     result.items.push({
       no: 1, kodeBarang: '', namaBarang: '(tidak terbaca)', 
-      harga: result.hargaJual || result.dpp, qty: 1, unit: '', 
-      jumlah: result.hargaJual || result.dpp,
+      harga: result.hargaJual || dppVal, qty: 1, unit: '', 
+      jumlah: result.hargaJual || dppVal,
       itemPotongan: result.potongan || 0,
-      itemDPP: result.dpp,
-      itemDPPNilaiLain: result.dppNilaiLain || Math.round(result.dpp * 11 / 12),
-      itemPPN: isPPNNol ? 0 : (result.ppn || Math.round(Math.round(result.dpp * 11 / 12) * 12 / 100)),
+      itemDPP: dppVal,
+      itemDPPNilaiLain: dppNLVal,
+      itemPPN: ppnVal,
       itemPPnBM: result.ppnbm || 0
     });
   }
@@ -3695,7 +3782,11 @@ function parseFakturCoretax(text, fileName) {
   }
 
   // Validate
-  if (!result.noFaktur && !result.dpp) return null;
+  if (!result.noFaktur && result.dpp === null && result.hargaJual === 0) return null;
+  // Ensure dpp and ppn are numbers (not null) for downstream
+  if (result.dpp === null) result.dpp = 0;
+  if (result.ppn === null) result.ppn = 0;
+  if (result.dppNilaiLain === null) result.dppNilaiLain = 0;
   return result;
 }
 
@@ -4124,36 +4215,10 @@ function exportExcel() {
   let itemNo = 0;
   let detailRowNum = 3; // header is row 3, data starts at row 4
   allFaktur.forEach(f => {
-    const isPPNNolFaktur = /^0[2378]0\./.test(f.noFaktur || '');
-    // Faktur-level targets (paten dari PDF via post-parse)
-    const fakturDPPNL = f.dppNilaiLain;
-    const fakturPPN = f.ppn;
-
-    // Per-item independent calculations
-    const itemCalcs = f.items.map(item => {
-      const dpp = (item.jumlah || 0) - (item.itemPotongan || 0);
-      const dppNL = Math.round(dpp * 11 / 12);
-      const ppn = isPPNNolFaktur ? 0 : Math.round(dppNL * 12 / 100);
-      return { dpp, dppNL, ppn };
-    });
-
-    // Safe remainder adjustment: match SUM to faktur-level, but never go negative
-    if (itemCalcs.length > 0) {
-      const sumDPPNL = itemCalcs.reduce((s, c) => s + c.dppNL, 0);
-      const sumPPN = itemCalcs.reduce((s, c) => s + c.ppn, 0);
-      const lastIdx = itemCalcs.length - 1;
-      const adjDPPNL = itemCalcs[lastIdx].dppNL + (fakturDPPNL - sumDPPNL);
-      const adjPPN = itemCalcs[lastIdx].ppn + (fakturPPN - sumPPN);
-      // Only apply if result stays non-negative
-      if (adjDPPNL >= 0) itemCalcs[lastIdx].dppNL = adjDPPNL;
-      if (adjPPN >= 0) itemCalcs[lastIdx].ppn = adjPPN;
-    }
-
     f.items.forEach((item, idx) => {
       itemNo++;
       detailRowNum++;
       const r = detailRowNum;
-      const calc = itemCalcs[idx];
       detailData.push([
         itemNo,
         f.noFaktur,
@@ -4167,9 +4232,9 @@ function exportExcel() {
         item.unit,
         item.jumlah,
         item.itemPotongan || 0,
-        { t: 'n', f: `K${r}-L${r}` },    // DPP = Harga Jual - Potongan (formula, no rounding issue)
-        calc.dppNL,                        // DPP Nilai Lain = hardcoded (remainder-adjusted)
-        calc.ppn,                          // PPN = hardcoded (remainder-adjusted)
+        { t: 'n', f: `K${r}-L${r}` },    // DPP = Harga Jual - Potongan (formula)
+        item.itemDPPNilaiLain,             // DPP Nilai Lain = paten dari PDF/calculated (already adjusted)
+        item.itemPPN,                      // PPN = paten dari PDF/calculated (already adjusted)
         item.itemPPnBM || 0
       ]);
     });
